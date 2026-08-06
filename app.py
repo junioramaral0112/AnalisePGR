@@ -1,10 +1,10 @@
-import io
+import asyncio
 import os
+import subprocess
 import tempfile
 from google import genai
 from google.genai import types
 import streamlit as st
-from weasyprint import HTML
 
 # Configuração da página do Streamlit
 st.set_page_config(
@@ -14,14 +14,50 @@ st.set_page_config(
 )
 
 
-# Função para converter HTML para PDF usando WeasyPrint
-def converter_html_para_pdf(html_code):
+# Garante que o navegador Chromium do Playwright esteja instalado
+@st.cache_resource
+def instalar_playwright_chromium():
     try:
-        pdf_bytes = HTML(string=html_code).write_pdf()
-        return pdf_bytes
+        subprocess.run(
+            ["playwright", "install", "chromium"],
+            check=True,
+            capture_output=True,
+        )
     except Exception as e:
-        st.error(f"Erro ao gerar PDF via WeasyPrint: {str(e)}")
-        return None
+        st.error(f"Erro ao instalar o Chromium para o Playwright: {e}")
+
+
+# Executa a instalação silenciosa do Chromium no ambiente
+instalar_playwright_chromium()
+
+
+# Função assíncrona para gerar PDF via Playwright (Chromium Headless)
+async def gerar_pdf_playwright_async(html_code: str) -> bytes:
+    from playwright.async_api import async_playwright
+
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
+        )
+        page = await browser.new_page()
+
+        # Carrega o HTML na página do Chromium
+        await page.set_content(html_code, wait_until="networkidle")
+
+        # Configura a impressão em PDF no padrão A4
+        pdf_bytes = await page.pdf(
+            format="A4",
+            print_background=True,
+            margin={"top": "15mm", "bottom": "15mm", "left": "10mm", "right": "10mm"},
+        )
+
+        await browser.close()
+        return pdf_bytes
+
+
+# Wrapper síncrono para o Streamlit
+def gerar_pdf_playwright(html_code: str) -> bytes:
+    return asyncio.run(gerar_pdf_playwright_async(html_code))
 
 
 # Barra Lateral - Configurações
@@ -85,7 +121,7 @@ if btn_analisar:
                 # Inicializa o cliente oficial do Google GenAI
                 client = genai.Client(api_key=api_key)
 
-                # Cria arquivos temporários seguros com tempfile
+                # Cria arquivos temporários para os uploads do PGR e PCMSO
                 with tempfile.NamedTemporaryFile(
                     delete=False, suffix=".pdf"
                 ) as tmp_pgr:
@@ -102,7 +138,7 @@ if btn_analisar:
                 up_pgr = client.files.upload(file=pgr_path)
                 up_pcmso = client.files.upload(file=pcmso_path)
 
-                # Prompt especializado para SST
+                # Prompt especializado em SST
                 prompt_sistema = f"""
                 Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, NR-20, NR-35, eSocial).
 
@@ -118,7 +154,7 @@ if btn_analisar:
                 4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
                 """
 
-                # Executa a geração de conteúdo com o modelo Gemini 2.5 Pro
+                # Executa a geração no modelo Gemini 2.5 Pro
                 response = client.models.generate_content(
                     model="gemini-2.5-pro",
                     contents=[up_pgr, up_pcmso, prompt_sistema],
@@ -131,7 +167,7 @@ if btn_analisar:
                 st.markdown("### 📋 Parecer Técnico e Análise de Conformidade")
                 st.write(resultado_texto)
 
-                # Verifica se há código HTML na resposta para conversão em PDF via WeasyPrint
+                # Verifica se a IA forneceu código HTML para gerar o PDF via Playwright
                 if "```html" in resultado_texto:
                     html_code = (
                         resultado_texto.split("```html")[1]
@@ -139,8 +175,8 @@ if btn_analisar:
                         .strip()
                     )
 
-                    # Gera o PDF usando a função WeasyPrint
-                    pdf_bytes = converter_html_para_pdf(html_code)
+                    with st.spinner("📄 Gerando PDF via Chromium Playwright..."):
+                        pdf_bytes = gerar_pdf_playwright(html_code)
 
                     if pdf_bytes:
                         st.markdown("---")
@@ -152,7 +188,7 @@ if btn_analisar:
                             mime="application/pdf",
                         )
 
-                # Limpeza de arquivos temporários locais e registros na API do Gemini
+                # Limpeza de arquivos temporários
                 os.remove(pgr_path)
                 os.remove(pcmso_path)
                 client.files.delete(name=up_pgr.name)
