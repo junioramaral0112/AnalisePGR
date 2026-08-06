@@ -174,7 +174,7 @@ LOGO_URL = "https://raw.githubusercontent.com/junioramaral0112/AnalisePGR/main/l
 st.sidebar.image(LOGO_URL, width=220)
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
-    "**AuditGuard SST**\n\nInteligência e Gestão de Auditoria de SST integradas via **DeepSeek API**."
+    "**AuditGuard SST**\n\nInteligência e Gestão de Auditoria de SST integradas via **Inteligência Artificial**."
 )
 
 # Cabeçalho Principal com Logo e Nome Comercial
