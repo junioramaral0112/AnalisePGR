@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import subprocess
 from openai import OpenAI
 from pypdf import PdfReader
@@ -29,7 +30,7 @@ def instalar_playwright_chromium():
 instalar_playwright_chromium()
 
 
-# Função para extrair texto de PDF em memória
+# Função para extrair texto dos PDFs
 def extrair_texto_pdf(pdf_file):
     try:
         reader = PdfReader(pdf_file)
@@ -44,7 +45,7 @@ def extrair_texto_pdf(pdf_file):
         return ""
 
 
-# Função assíncrona para gerar PDF via Playwright
+# Função assíncrona para gerar PDF via Playwright (A4 Paisagem/Landscape se for tabela larga)
 async def gerar_pdf_playwright_async(html_code: str) -> bytes:
     from playwright.async_api import async_playwright
 
@@ -53,14 +54,19 @@ async def gerar_pdf_playwright_async(html_code: str) -> bytes:
             headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         page = await browser.new_page()
+
+        # Define viewport grande para renderizar tabelas largas sem corte
+        await page.set_viewport_size({"width": 1280, "height": 800})
         await page.set_content(html_code, wait_until="networkidle")
 
+        # Gera PDF no formato A4 em orientação Paisagem (Landscape) para caber todas as colunas do Apêndice
         pdf_bytes = await page.pdf(
             format="A4",
+            landscape=True,
             print_background=True,
             margin={
-                "top": "15mm",
-                "bottom": "15mm",
+                "top": "10mm",
+                "bottom": "10mm",
                 "left": "10mm",
                 "right": "10mm",
             },
@@ -74,13 +80,13 @@ def gerar_pdf_playwright(html_code: str) -> bytes:
     return asyncio.run(gerar_pdf_playwright_async(html_code))
 
 
-# Interface
+# Interface do Streamlit
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
-    "**Sistema de Gestão de Auditoria de SST**\n\nMotor de IA: **DeepSeek API**"
+    "**Sistema de SST & Auditoria**\n\nGerador de Contestações e Apêndices Normativos via **DeepSeek API**."
 )
 
-st.title("🛡️ Análise Automatizada de Auditorias de SST (DeepSeek)")
+st.title("🛡️ Análise Automatizada de Auditorias de SST")
 st.markdown(
     "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas."
 )
@@ -99,14 +105,14 @@ with col2:
 
 ressalvas_text = st.text_area(
     "📝 Cole o texto das Ressalvas / Glosas da Auditoria aqui:",
-    height=180,
+    height=160,
     placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário de Riscos Ocupacionais...",
 )
 
-btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Resposta com DeepSeek")
+btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Parecer / Apêndice")
 
 if btn_analisar:
-    # 1. Busca a chave do DeepSeek dos Secrets ou Ambiente
+    # Captura da Chave de API dos Secrets ou Variável de Ambiente
     api_key = ""
     if "DEEPSEEK_API_KEY" in st.secrets:
         api_key = str(st.secrets["DEEPSEEK_API_KEY"]).strip()
@@ -123,46 +129,44 @@ if btn_analisar:
         st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
     else:
         with st.spinner(
-            "⏳ Lendo documentos e enviando para a API do DeepSeek..."
+            "⏳ Lendo documentos e processando análise técnica com o DeepSeek..."
         ):
             try:
-                # Extrai os textos dos PDFs
+                # Extrai conteúdo dos arquivos enviados
                 texto_pgr = extrair_texto_pdf(pgr_file)
                 texto_pcmso = extrair_texto_pdf(pcmso_file)
 
-                # Inicializa o cliente apontando para o servidor do DeepSeek
                 client = OpenAI(
                     api_key=api_key, base_url="https://api.deepseek.com"
                 )
 
                 prompt_completo = f"""
-                Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, NR-20, NR-35, eSocial).
+                Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, eSocial).
 
-                Sua missão é analisar as RESSALVAS/GLOSAS emitidas pela auditoria de terceiros e confrontá-las diretamente com o texto do PGR e PCMSO fornecidos abaixo.
+                Sua missão é analisar as RESSALVAS/GLOSAS emitidas pela auditoria de terceiros e confrontá-las com os documentos anexados (PGR e PCMSO).
 
-                --- CONTEÚDO EXTRAÍDO DO PGR ---
+                --- CONTEÚDO DO PGR ---
                 {texto_pgr[:40000]}
 
-                --- CONTEÚDO EXTRAÍDO DO PCMSO ---
+                --- CONTEÚDO DO PCMSO ---
                 {texto_pcmso[:40000]}
 
-                --- TEXTO DAS RESSALVAS/GLOSAS DA AUDITORIA ---
+                --- RESSALVAS DA AUDITORIA ---
                 {ressalvas_text}
 
-                INSTRUÇÕES DE RESPOSTA:
-                1. Analise criticamente se as ressalvas são PROCEDENTES ou IMPROCEDENTES consultando os textos do PGR e PCMSO.
-                2. Gere um PARECER TÉCNICO DE CONTESTAÇÃO E RESPOSTA completo e fundamentado, citando os itens e a legislação vigente (especialmente a transição e regras de Riscos Psicossociais da NR-01 e NR-17).
-                3. Se a ressalva exigir a entrega ou reestruturação de um documento, apêndice ou tabela (ex: Inventário de Riscos/Apêndice A), forneça o código HTML5 e CSS3 (inline/style) COMPLETO e formatado para impressão A4 ao final do seu parecer.
-                4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
+                DIRETRIZES DE SAÍDA:
+                1. Emita o PARECER TÉCNICO DE CONTESTAÇÃO E RESPOSTA completo fundamentado na legislação.
+                2. Se for necessário emitir um Apêndice/Inventário de Riscos corrigido, inclua obrigatoriamente a tabela completa com TODOS os riscos (Físicos, Químicos, Acidentes, Ergonômicos e Psicossociais).
+                3. OBRIGATÓRIO: Forneça o código HTML5/CSS3 COMPLETO (com as tags <!DOCTYPE html><html>...</html>) contendo toda a estrutura visual e os DADOS PREENCHIDOS DAS TABELAS.
+                4. Coloque o código HTML estritamente envolvido pelas marcas: ```html e ```.
                 """
 
-                # Faz a chamada para a API do DeepSeek
                 response = client.chat.completions.create(
                     model="deepseek-chat",
                     messages=[
                         {
                             "role": "system",
-                            "content": "Você é um especialista em auditorias e normas de Segurança e Saúde no Trabalho (SST).",
+                            "content": "Você é um especialista em auditorias e normas de Segurança do Trabalho.",
                         },
                         {"role": "user", "content": prompt_completo},
                     ],
@@ -171,32 +175,44 @@ if btn_analisar:
 
                 resultado_texto = response.choices[0].message.content
 
-                st.success("✅ Análise concluída com sucesso via DeepSeek!")
-                st.markdown("### 📋 Parecer Técnico e Análise de Conformidade")
+                st.success("✅ Análise concluída com sucesso!")
+                st.markdown("### 📋 Parecer Técnico de SST")
                 st.write(resultado_texto)
 
-                # Processamento do PDF via Playwright caso a IA tenha retornado HTML
-                if "```html" in resultado_texto:
-                    html_code = (
-                        resultado_texto.split("```html")[1]
-                        .split("```")[0]
-                        .strip()
-                    )
+                # Busca o bloco HTML na resposta com Expressão Regular robusta
+                match = re.search(
+                    r"```html\s*(.*?)\s*```", resultado_texto, re.DOTALL
+                )
 
-                    with st.spinner(
-                        "📄 Gerando PDF formatado via Chromium..."
-                    ):
-                        pdf_bytes = gerar_pdf_playwright(html_code)
+                if match:
+                    codigo_html = match.group(1).strip()
 
-                    if pdf_bytes:
-                        st.markdown("---")
-                        st.markdown("### 📥 Documento / Apêndice Gerado")
+                    st.markdown("---")
+                    st.markdown("### 📥 Arquivos do Apêndice Gerados")
+
+                    c_down1, c_down2 = st.columns(2)
+
+                    # Botão 1: Baixar em HTML direto (para abrir no navegador ou Word)
+                    with c_down1:
                         st.download_button(
-                            label="📄 Baixar Apêndice/Documento Corrigido em PDF",
-                            data=pdf_bytes,
-                            file_name="Apendice_Corrigido_SST.pdf",
-                            mime="application/pdf",
+                            label="🌐 Baixar Apêndice em HTML (.html)",
+                            data=codigo_html.encode("utf-8"),
+                            file_name="Apendice_Corrigido_SST.html",
+                            mime="text/html",
                         )
 
+                    # Botão 2: Converter e Baixar em PDF (A4 Landscape) via Playwright
+                    with c_down2:
+                        with st.spinner("📄 Convertendo HTML em PDF..."):
+                            pdf_bytes = gerar_pdf_playwright(codigo_html)
+
+                        if pdf_bytes:
+                            st.download_button(
+                                label="📄 Baixar Apêndice em PDF (.pdf)",
+                                data=pdf_bytes,
+                                file_name="Apendice_Corrigido_SST.pdf",
+                                mime="application/pdf",
+                            )
+
             except Exception as e:
-                st.error(f"❌ Ocorreu um erro no DeepSeek: {str(e)}")
+                st.error(f"❌ Ocorreu um erro no processamento: {str(e)}")
