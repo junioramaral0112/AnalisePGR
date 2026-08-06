@@ -1,11 +1,11 @@
-import asyncio
+import io
 import os
-import re
-import subprocess
+from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.shared import Inches, Pt, RGBColor
 from openai import OpenAI
 from pypdf import PdfReader
 import streamlit as st
-import streamlit.components.v1 as components
 
 # Configuração da página do Streamlit
 st.set_page_config(
@@ -14,24 +14,14 @@ st.set_page_config(
     layout="wide",
 )
 
-
-# Garante a instalação do Chromium no Playwright
-@st.cache_resource
-def instalar_playwright_chromium():
-    try:
-        subprocess.run(
-            ["playwright", "install", "chromium"],
-            check=True,
-            capture_output=True,
-        )
-    except Exception as e:
-        st.error(f"Erro ao instalar o Chromium: {e}")
+# Inicializa o session_state para manter o download fixo na tela
+if "docx_bytes" not in st.session_state:
+    st.session_state.docx_bytes = None
+if "texto_parecer" not in st.session_state:
+    st.session_state.texto_parecer = None
 
 
-instalar_playwright_chromium()
-
-
-# Função para extrair texto dos PDFs
+# Função para extrair texto dos PDFs enviados
 def extrair_texto_pdf(pdf_file):
     try:
         reader = PdfReader(pdf_file)
@@ -46,48 +36,100 @@ def extrair_texto_pdf(pdf_file):
         return ""
 
 
-# Função assíncrona para gerar PDF via Playwright (A4 Landscape para tabelas largas)
-async def gerar_pdf_playwright_async(html_code: str) -> bytes:
-    from playwright.async_api import async_playwright
+# Função para converter o texto em um documento Word (.docx) formatado
+def criar_documento_word(texto_parecer):
+    doc = Document()
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
-        )
-        page = await browser.new_page()
+    # Estilo geral do documento
+    style = doc.styles["Normal"]
+    font = style.font
+    font.name = "Calibri"
+    font.size = Pt(11)
 
-        await page.set_viewport_size({"width": 1280, "height": 800})
-        await page.set_content(html_code, wait_until="networkidle")
+    # Título Principal
+    p_titulo = doc.add_paragraph()
+    p_titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run_titulo = p_titulo.add_run(
+        "PARECER TÉCNICO DE CONTESTAÇÃO E APÊNDICE DE SST"
+    )
+    run_titulo.bold = True
+    run_titulo.font.size = Pt(16)
+    run_titulo.font.color.rgb = RGBColor(0, 51, 102)
 
-        pdf_bytes = await page.pdf(
-            format="A4",
-            landscape=True,
-            print_background=True,
-            margin={
-                "top": "10mm",
-                "bottom": "10mm",
-                "left": "10mm",
-                "right": "10mm",
-            },
-        )
+    doc.add_paragraph()  # Espaço
 
-        await browser.close()
-        return pdf_bytes
+    # Processa o texto linha por linha para formatar títulos, listas e tabelas
+    linhas = texto_parecer.split("\n")
+    tabela_atual = None
+
+    for linha in linhas:
+        linha_str = linha.strip()
+
+        if not linha_str:
+            continue
+
+        # Títulos de Seções (ex: # 1. Objeto, ## Apêndice A)
+        if linha_str.startswith("#"):
+            titulo_limpo = linha_str.lstrip("#").strip()
+            p_sub = doc.add_paragraph()
+            run_sub = p_sub.add_run(titulo_limpo)
+            run_sub.bold = True
+            run_sub.font.size = Pt(13)
+            run_sub.font.color.rgb = RGBColor(0, 102, 153)
+
+        # Trata linhas de tabelas Markdown (| Coluna 1 | Coluna 2 |)
+        elif linha_str.startswith("|") and linha_str.endswith("|"):
+            colunas = [c.strip() for c in linha_str.split("|")[1:-1]]
+
+            # Ignora linha separadora do markdown (|---|---|)
+            if all(set(c) <= set("-: ") for c in colunas):
+                continue
+
+            # Se for o início de uma nova tabela
+            if tabela_atual is None:
+                tabela_atual = doc.add_table(rows=1, cols=len(colunas))
+                tabela_atual.style = "Table Grid"
+                hdr_cells = tabela_atual.rows[0].cells
+                for i, col_texto in enumerate(colunas):
+                    hdr_cells[i].text = col_texto
+                    # Deixa o cabeçalho em negrito
+                    for paragraph in hdr_cells[i].paragraphs:
+                        for run in paragraph.runs:
+                            run.bold = True
+            else:
+                row_cells = tabela_atual.add_row().cells
+                for i, col_texto in enumerate(colunas):
+                    if i < len(row_cells):
+                        row_cells[i].text = col_texto
+        else:
+            # Reseta o ponteiro da tabela ao voltar a ser texto normal
+            tabela_atual = None
+
+            # Linha comum de parágrafo
+            p = doc.add_paragraph()
+            # Trata negritos simples em markdown (**texto**)
+            partes = linha_str.split("**")
+            for idx, parte in enumerate(partes):
+                run = p.add_run(parte)
+                if idx % 2 != 0:  # Parte ímpar estava entre ** **
+                    run.bold = True
+
+    # Salva o arquivo Word em um buffer de memória de bytes
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    return buffer.getvalue()
 
 
-def gerar_pdf_playwright(html_code: str) -> bytes:
-    return asyncio.run(gerar_pdf_playwright_async(html_code))
-
-
-# Painel Lateral
+# Interface
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
-    "**Sistema de Gestão de SST & Auditoria**\n\nMotor de IA: **DeepSeek API**"
+    "**Sistema de Gestão de SST & Auditoria**\n\nGerador de Documentos Word (.docx) via **DeepSeek API**."
 )
 
 st.title("🛡️ Análise Automatizada de Auditorias de SST")
 st.markdown(
-    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas da auditoria."
+    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas."
 )
 
 col1, col2 = st.columns(2)
@@ -108,10 +150,9 @@ ressalvas_text = st.text_area(
     placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário de Riscos Ocupacionais...",
 )
 
-btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Parecer / Apêndice")
+btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Parecer em Word")
 
 if btn_analisar:
-    # Captura da chave dos Secrets ou Ambiente
     api_key = ""
     if "DEEPSEEK_API_KEY" in st.secrets:
         api_key = str(st.secrets["DEEPSEEK_API_KEY"]).strip()
@@ -128,7 +169,7 @@ if btn_analisar:
         st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
     else:
         with st.spinner(
-            "⏳ Lendo documentos e processando análise técnica com o DeepSeek..."
+            "⏳ Lendo documentos e gerando relatório técnico com o DeepSeek..."
         ):
             try:
                 texto_pgr = extrair_texto_pdf(pgr_file)
@@ -139,9 +180,9 @@ if btn_analisar:
                 )
 
                 prompt_completo = f"""
-                Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, eSocial).
+                Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias de SST (NR-01, NR-07, NR-17, eSocial).
 
-                Sua missão é emitir o Parecer Técnico de Contestação de SST e a revisão do Apêndice A (Inventário de Riscos).
+                Sua missão é emitir o PARECER TÉCNICO DE CONTESTAÇÃO DE SST e o APÊNDICE A (Inventário de Riscos Ocupacionais Consolidado) e APÊNDICE B (Plano de Ação).
 
                 --- CONTEÚDO DO PGR ---
                 {texto_pgr[:40000]}
@@ -152,11 +193,10 @@ if btn_analisar:
                 --- RESSALVAS DA AUDITORIA ---
                 {ressalvas_text}
 
-                REGRAS OBRIGATÓRIAS DE FORMATO:
-                1. Escreva a resposta INTEIRA dentro de um único documento HTML5 válido, iniciando em <!DOCTYPE html> e fechando em </html>.
-                2. Não escreva textos explicativos fora das tags HTML. Toda a resposta (Parecer Técnico + Tabelas do Apêndice A de Riscos Físicos, Químicos, Acidentes, Ergonômicos e Psicossociais) deve estar inclusa no corpo da página HTML.
-                3. Utilize estilos CSS modernos inline ou na tag <style> com visual corporativo e profissional (tabelas com bordas limpas, fontes Arial/Helvetica, cabeçalhos destacados).
-                4. Retorne o código estritamente delimitado pelas marcas ```html no início e ``` no final.
+                DIRETRIZES DE FORMATAÇÃO:
+                1. Escreva o Parecer Técnico completo fundamentado na legislação.
+                2. Monte as tabelas do Apêndice A (com riscos Físicos, Químicos, Acidentes, Ergonômicos e Psicossociais) e Apêndice B usando o formato padrão de Tabela Markdown (| Coluna 1 | Coluna 2 | Coluna 3 |).
+                3. Utilize títulos Markdown (# Seção, ## Subseção) e negrito (**texto**) para estruturar o documento.
                 """
 
                 response = client.chat.completions.create(
@@ -164,59 +204,39 @@ if btn_analisar:
                     messages=[
                         {
                             "role": "system",
-                            "content": "Você é um gerador automatizado de pareceres de SST formatados em HTML5 completo.",
+                            "content": "Você é um gerador de laudos e pareceres técnicos de SST.",
                         },
                         {"role": "user", "content": prompt_completo},
                     ],
                     stream=False,
                 )
 
-                resultado_bruto = response.choices[0].message.content
+                texto_resposta = response.choices[0].message.content
 
-                # Extrai o código HTML limpo da resposta
-                if "```html" in resultado_bruto:
-                    codigo_html = (
-                        resultado_bruto.split("```html")[1]
-                        .split("```")[0]
-                        .strip()
-                    )
-                else:
-                    codigo_html = resultado_bruto.strip()
+                # Converte a resposta estruturada em arquivo Word
+                bytes_word = criar_documento_word(texto_resposta)
 
-                st.success(
-                    "✅ Análise e documento gerados com sucesso pelo DeepSeek!"
-                )
+                # Salva na sessão para manter a tela fixa
+                st.session_state.texto_parecer = texto_resposta
+                st.session_state.docx_bytes = bytes_word
 
-                # Área de Downloads (Gera o PDF via Playwright)
-                st.markdown("---")
-                st.markdown("### 📥 Baixe os Arquivos Gerados")
-
-                col_d1, col_d2 = st.columns(2)
-
-                with col_d2:
-                    st.download_button(
-                        label="🌐 Baixar Documento Completo em HTML (.html)",
-                        data=codigo_html.encode("utf-8"),
-                        file_name="Parecer_e_Apendice_SST.html",
-                        mime="text/html",
-                    )
-
-                with col_d1:
-                    with st.spinner("📄 Convertendo documento para PDF..."):
-                        pdf_bytes = gerar_pdf_playwright(codigo_html)
-
-                    if pdf_bytes:
-                        st.download_button(
-                            label="📄 Baixar Parecer e Apêndice em PDF (.pdf)",
-                            data=pdf_bytes,
-                            file_name="Parecer_e_Apendice_SST.pdf",
-                            mime="application/pdf",
-                        )
-
-                # Exibe o relatório formatado na tela
-                st.markdown("---")
-                st.markdown("### 📋 Pré-visualização do Relatório")
-                components.html(codigo_html, height=800, scrolling=True)
+                st.success("✅ Parecer e Apêndice gerados com sucesso!")
 
             except Exception as e:
                 st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
+
+# Exibe o resultado e o botão de download persistente
+if st.session_state.docx_bytes:
+    st.markdown("---")
+    st.markdown("### 📥 Baixar Documento Editável")
+
+    st.download_button(
+        label="📝 Baixar Parecer e Apêndice no Word (.docx)",
+        data=st.session_state.docx_bytes,
+        file_name="Parecer_e_Apendice_SST.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+    st.markdown("---")
+    st.markdown("### 📋 Conteúdo Gerado")
+    st.write(st.session_state.texto_parecer)
