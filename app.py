@@ -1,5 +1,7 @@
 import io
 import os
+import json
+from datetime import datetime
 from docx import Document
 from docx.enum.section import WD_ORIENT, WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -52,6 +54,52 @@ if "docx_bytes" not in st.session_state:
     st.session_state.docx_bytes = None
 if "texto_resposta" not in st.session_state:
     st.session_state.texto_resposta = None
+
+# ==========================================================================
+# GERENCIAMENTO DE USUÁRIOS E COTAS (PROTEÇÃO DE TOKENS)
+# ==========================================================================
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+_USERS_FILE = os.path.join(_DATA_DIR, "usuarios.json")
+LIMITE_MENSAL_PADRAO = 200
+
+def _carregar_usuarios() -> dict:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    if not os.path.exists(_USERS_FILE):
+        return {}
+    with open(_USERS_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        # Reset mensal automático
+        mes_atual = datetime.now().month
+        mudou = False
+        for user in data:
+            if data[user].get("mes_referencia") != mes_atual:
+                data[user]["auditorias_mes_atual"] = 0
+                data[user]["mes_referencia"] = mes_atual
+                mudou = True
+        if mudou:
+            with open(_USERS_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        return data
+
+def _salvar_usuarios(data: dict) -> None:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    with open(_USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def verificar_limite_auditorias(usuario: str) -> tuple[bool, int, int]:
+    usuarios = _carregar_usuarios()
+    user_data = usuarios.get(usuario, {})
+    
+    limite = user_data.get("limite_mensal", LIMITE_MENSAL_PADRAO)
+    uso_atual = user_data.get("auditorias_mes_atual", 0)
+    
+    return (uso_atual < limite), uso_atual, limite
+
+def incrementar_uso_auditoria(usuario: str):
+    usuarios = _carregar_usuarios()
+    if usuario in usuarios:
+        usuarios[usuario]["auditorias_mes_atual"] = usuarios[usuario].get("auditorias_mes_atual", 0) + 1
+        _salvar_usuarios(usuarios)
 
 
 # Leitura dos PDFs
@@ -177,6 +225,14 @@ st.sidebar.info(
     "**AuditGuard SST**\n\nInteligência e Gestão de Auditoria de SST integradas via **Inteligência Artificial**."
 )
 
+# Indicador de Consumo da Cota no Sidebar para o Usuário
+usuario_logado = st.session_state.get("usuario", "admin")
+permitido_sidebar, uso_sidebar, limite_sidebar = verificar_limite_auditorias(usuario_logado)
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📊 Cota Mensal (IA)")
+st.sidebar.progress(min(uso_sidebar / limite_sidebar, 1.0))
+st.sidebar.write(f"Utilizadas: **{uso_sidebar} / {limite_sidebar}**")
+
 # Cabeçalho Principal com Logo e Nome Comercial
 col_logo, col_titulo = st.columns([1, 5])
 
@@ -215,6 +271,13 @@ ressalvas_text = st.text_area(
 btn_analisar = st.button("🚀 Analisar Ressalvas com AuditGuard SST")
 
 if btn_analisar:
+    # 1. VERIFICAÇÃO DE COTA ANTES DE GASTAR TOKENS
+    permitido, uso_atual, limite_max = verificar_limite_auditorias(usuario_logado)
+    
+    if not permitido:
+        st.error(f"🚫 **Limite mensal atingido:** Você atingiu o teto de {limite_max} auditorias permitidas para este mês. Entre em contato com o suporte para regularizar ou ampliar o plano.")
+        st.stop()
+
     api_key = ""
     if "DEEPSEEK_API_KEY" in st.secrets:
         api_key = str(st.secrets["DEEPSEEK_API_KEY"]).strip()
@@ -289,10 +352,13 @@ if btn_analisar:
                     texto_resposta
                 )
 
+                # Computa o consumo no arquivo JSON apenas após sucesso na API
+                incrementar_uso_auditoria(usuario_logado)
+
                 st.session_state.texto_resposta = texto_resposta
                 st.session_state.docx_bytes = bytes_word
 
-                st.success("✅ Contestação e Apêndice gerados com sucesso!")
+                st.success("✅ Contestação e Apêndice gerados com sucesso! (Uso computado)")
 
             except Exception as e:
                 st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
