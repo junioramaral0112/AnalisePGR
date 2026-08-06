@@ -2,7 +2,7 @@ import io
 import os
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Pt, RGBColor
 from openai import OpenAI
 from pypdf import PdfReader
 import streamlit as st
@@ -14,14 +14,18 @@ st.set_page_config(
     layout="wide",
 )
 
-# Inicializa o session_state para manter o download fixo na tela
-if "docx_bytes" not in st.session_state:
-    st.session_state.docx_bytes = None
+# Inicializa o session_state para manter a tela e os downloads fixos
+if "docx_parecer" not in st.session_state:
+    st.session_state.docx_parecer = None
+if "docx_apendice" not in st.session_state:
+    st.session_state.docx_apendice = None
 if "texto_parecer" not in st.session_state:
     st.session_state.texto_parecer = None
+if "texto_apendice" not in st.session_state:
+    st.session_state.texto_apendice = None
 
 
-# Função para extrair texto dos PDFs enviados
+# Extração de texto dos PDFs
 def extrair_texto_pdf(pdf_file):
     try:
         reader = PdfReader(pdf_file)
@@ -36,65 +40,58 @@ def extrair_texto_pdf(pdf_file):
         return ""
 
 
-# Função para converter o texto em um documento Word (.docx) formatado
-def criar_documento_word(texto_parecer):
+# Converte texto estruturado em formato Word (.docx) com suporte a tabelas
+def converter_texto_para_word(texto_markdown, titulo_doc):
     doc = Document()
 
-    # Estilo geral do documento
+    # Formatação de Fonte
     style = doc.styles["Normal"]
     font = style.font
     font.name = "Calibri"
     font.size = Pt(11)
 
-    # Título Principal
+    # Título Principal do Arquivo
     p_titulo = doc.add_paragraph()
     p_titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run_titulo = p_titulo.add_run(
-        "PARECER TÉCNICO DE CONTESTAÇÃO E APÊNDICE DE SST"
-    )
+    run_titulo = p_titulo.add_run(titulo_doc)
     run_titulo.bold = True
-    run_titulo.font.size = Pt(16)
+    run_titulo.font.size = Pt(15)
     run_titulo.font.color.rgb = RGBColor(0, 51, 102)
 
-    doc.add_paragraph()  # Espaço
+    doc.add_paragraph()
 
-    # Processa o texto linha por linha para formatar títulos, listas e tabelas
-    linhas = texto_parecer.split("\n")
+    linhas = texto_markdown.split("\n")
     tabela_atual = None
 
     for linha in linhas:
         linha_str = linha.strip()
-
         if not linha_str:
             continue
 
-        # Títulos de Seções (ex: # 1. Objeto, ## Apêndice A)
+        # Títulos de seções
         if linha_str.startswith("#"):
             titulo_limpo = linha_str.lstrip("#").strip()
             p_sub = doc.add_paragraph()
             run_sub = p_sub.add_run(titulo_limpo)
             run_sub.bold = True
-            run_sub.font.size = Pt(13)
+            run_sub.font.size = Pt(12)
             run_sub.font.color.rgb = RGBColor(0, 102, 153)
 
-        # Trata linhas de tabelas Markdown (| Coluna 1 | Coluna 2 |)
+        # Montagem de Tabelas em Word
         elif linha_str.startswith("|") and linha_str.endswith("|"):
             colunas = [c.strip() for c in linha_str.split("|")[1:-1]]
 
-            # Ignora linha separadora do markdown (|---|---|)
             if all(set(c) <= set("-: ") for c in colunas):
                 continue
 
-            # Se for o início de uma nova tabela
             if tabela_atual is None:
                 tabela_atual = doc.add_table(rows=1, cols=len(colunas))
                 tabela_atual.style = "Table Grid"
                 hdr_cells = tabela_atual.rows[0].cells
                 for i, col_texto in enumerate(colunas):
                     hdr_cells[i].text = col_texto
-                    # Deixa o cabeçalho em negrito
-                    for paragraph in hdr_cells[i].paragraphs:
-                        for run in paragraph.runs:
+                    for p in hdr_cells[i].paragraphs:
+                        for run in p.runs:
                             run.bold = True
             else:
                 row_cells = tabela_atual.add_row().cells
@@ -102,19 +99,14 @@ def criar_documento_word(texto_parecer):
                     if i < len(row_cells):
                         row_cells[i].text = col_texto
         else:
-            # Reseta o ponteiro da tabela ao voltar a ser texto normal
             tabela_atual = None
-
-            # Linha comum de parágrafo
             p = doc.add_paragraph()
-            # Trata negritos simples em markdown (**texto**)
             partes = linha_str.split("**")
             for idx, parte in enumerate(partes):
                 run = p.add_run(parte)
-                if idx % 2 != 0:  # Parte ímpar estava entre ** **
+                if idx % 2 != 0:
                     run.bold = True
 
-    # Salva o arquivo Word em um buffer de memória de bytes
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)
@@ -124,7 +116,7 @@ def criar_documento_word(texto_parecer):
 # Interface
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
-    "**Sistema de Gestão de SST & Auditoria**\n\nGerador de Documentos Word (.docx) via **DeepSeek API**."
+    "**Sistema de Gestão de SST & Auditoria**\n\nGerador de Documentos Word (.docx)"
 )
 
 st.title("🛡️ Análise Automatizada de Auditorias de SST")
@@ -150,7 +142,7 @@ ressalvas_text = st.text_area(
     placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário de Riscos Ocupacionais...",
 )
 
-btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Parecer em Word")
+btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Documentos em Word")
 
 if btn_analisar:
     api_key = ""
@@ -169,7 +161,7 @@ if btn_analisar:
         st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
     else:
         with st.spinner(
-            "⏳ Lendo documentos e gerando relatório técnico com o DeepSeek..."
+            "⏳ Elaborando o Parecer e o Apêndice em Word com o DeepSeek..."
         ):
             try:
                 texto_pgr = extrair_texto_pdf(pgr_file)
@@ -182,7 +174,7 @@ if btn_analisar:
                 prompt_completo = f"""
                 Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias de SST (NR-01, NR-07, NR-17, eSocial).
 
-                Sua missão é emitir o PARECER TÉCNICO DE CONTESTAÇÃO DE SST e o APÊNDICE A (Inventário de Riscos Ocupacionais Consolidado) e APÊNDICE B (Plano de Ação).
+                Sua missão é gerar DOIS BLOCOS DE RESPOSTA BEM DELIMITADOS:
 
                 --- CONTEÚDO DO PGR ---
                 {texto_pgr[:40000]}
@@ -193,10 +185,21 @@ if btn_analisar:
                 --- RESSALVAS DA AUDITORIA ---
                 {ressalvas_text}
 
-                DIRETRIZES DE FORMATAÇÃO:
-                1. Escreva o Parecer Técnico completo fundamentado na legislação.
-                2. Monte as tabelas do Apêndice A (com riscos Físicos, Químicos, Acidentes, Ergonômicos e Psicossociais) e Apêndice B usando o formato padrão de Tabela Markdown (| Coluna 1 | Coluna 2 | Coluna 3 |).
-                3. Utilize títulos Markdown (# Seção, ## Subseção) e negrito (**texto**) para estruturar o documento.
+                ESTRUTURA DA RESPOSTA:
+                Utilize a marca === DIVISOR === exatamente para separar o Parecer Técnico do Apêndice.
+
+                [BLOCO 1: PARECER TÉCNICO]
+                # PARECER TÉCNICO DE CONTESTAÇÃO DE SST
+                (Escreva a resposta e contestação fundamentada na norma).
+
+                === DIVISOR ===
+
+                [BLOCO 2: APÊNDICE A E B]
+                # APÊNDICE A – INVENTÁRIO DE RISCOS OCUPACIONAIS CONSOLIDADO
+                (Monte a tabela completa Markdown com as colunas: Tipo de Risco | Exposição | Perigo/Fonte Geradora | Resultado | Reconhecido? | Risco/Dano | Avaliação Inicial | Medidas de Controle | Avaliação Residual | eSocial/Plano de Ação. Inclua Riscos Físicos, Químicos, Acidentes, Ergonômicos e Psicossociais).
+
+                # APÊNDICE B – PLANO DE AÇÃO DE SAÚDE MENTAL E RISCOS PSICOSSOCIAIS
+                (Monte a tabela do Plano de Ação em formato Markdown).
                 """
 
                 response = client.chat.completions.create(
@@ -204,39 +207,69 @@ if btn_analisar:
                     messages=[
                         {
                             "role": "system",
-                            "content": "Você é um gerador de laudos e pareceres técnicos de SST.",
+                            "content": "Você é um gerador de laudos técnicos de SST formatados com delimitador === DIVISOR ===",
                         },
                         {"role": "user", "content": prompt_completo},
                     ],
                     stream=False,
                 )
 
-                texto_resposta = response.choices[0].message.content
+                conteudo_total = response.choices[0].message.content
 
-                # Converte a resposta estruturada em arquivo Word
-                bytes_word = criar_documento_word(texto_resposta)
+                # Divide o parecer do apêndice usando o divisor
+                if "=== DIVISOR ===" in conteudo_total:
+                    partes = conteudo_total.split("=== DIVISOR ===")
+                    texto_parecer = partes[0].strip()
+                    texto_apendice = partes[1].strip()
+                else:
+                    texto_parecer = conteudo_total
+                    texto_apendice = conteudo_total
 
-                # Salva na sessão para manter a tela fixa
-                st.session_state.texto_parecer = texto_resposta
-                st.session_state.docx_bytes = bytes_word
+                # Gera os dois arquivos Word
+                bytes_parecer = converter_texto_para_word(
+                    texto_parecer, "PARECER TÉCNICO DE CONTESTAÇÃO DE SST"
+                )
+                bytes_apendice = converter_texto_para_word(
+                    texto_apendice,
+                    "APÊNDICE A E B – INVENTÁRIO DE RISCOS E PLANO DE AÇÃO",
+                )
 
-                st.success("✅ Parecer e Apêndice gerados com sucesso!")
+                # Salva na memória do Streamlit
+                st.session_state.texto_parecer = texto_parecer
+                st.session_state.texto_apendice = texto_apendice
+                st.session_state.docx_parecer = bytes_parecer
+                st.session_state.docx_apendice = bytes_apendice
+
+                st.success(
+                    "✅ Parecer Técnico e Apêndice gerados com sucesso em Word!"
+                )
 
             except Exception as e:
                 st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
 
-# Exibe o resultado e o botão de download persistente
-if st.session_state.docx_bytes:
+# Exibição dos botões fixos de download
+if st.session_state.docx_parecer and st.session_state.docx_apendice:
     st.markdown("---")
-    st.markdown("### 📥 Baixar Documento Editável")
+    st.markdown("### 📥 Baixe os Arquivos Editáveis no Word (.docx)")
 
-    st.download_button(
-        label="📝 Baixar Parecer e Apêndice no Word (.docx)",
-        data=st.session_state.docx_bytes,
-        file_name="Parecer_e_Apendice_SST.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    col_w1, col_w2 = st.columns(2)
+
+    with col_w1:
+        st.download_button(
+            label="📝 Baixar Parecer Técnico (.docx)",
+            data=st.session_state.docx_parecer,
+            file_name="Parecer_Tecnico_SST.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+
+    with col_w2:
+        st.download_button(
+            label="📊 Baixar Apêndice A e B (.docx)",
+            data=st.session_state.docx_apendice,
+            file_name="Apendice_A_e_B_Inventario_Riscos.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
 
     st.markdown("---")
-    st.markdown("### 📋 Conteúdo Gerado")
-    st.write(st.session_state.texto_parecer)
+    st.markdown("### 📋 Pré-visualização do Apêndice Gerado")
+    st.write(st.session_state.texto_apendice)
