@@ -1,10 +1,10 @@
 import io
 import os
-import re
+import tempfile
 from google import genai
 from google.genai import types
 import streamlit as st
-from xhtml2pdf import pisa
+from weasyprint import HTML
 
 # Configuração da página do Streamlit
 st.set_page_config(
@@ -14,13 +14,14 @@ st.set_page_config(
 )
 
 
-# Função para converter HTML em PDF usando xhtml2pdf (Python Puro)
+# Função para converter HTML para PDF usando WeasyPrint
 def converter_html_para_pdf(html_code):
-    pdf_buffer = io.BytesIO()
-    pisa_status = pisa.CreatePDF(src=io.StringIO(html_code), dest=pdf_buffer)
-    if pisa_status.err:
+    try:
+        pdf_bytes = HTML(string=html_code).write_pdf()
+        return pdf_bytes
+    except Exception as e:
+        st.error(f"Erro ao gerar PDF via WeasyPrint: {str(e)}")
         return None
-    return pdf_buffer.getvalue()
 
 
 # Barra Lateral - Configurações
@@ -84,16 +85,22 @@ if btn_analisar:
                 # Inicializa o cliente oficial do Google GenAI
                 client = genai.Client(api_key=api_key)
 
-                # Salva arquivos temporariamente para upload na API
-                with open("temp_pgr.pdf", "wb") as f:
-                    f.write(pgr_file.getbuffer())
+                # Cria arquivos temporários seguros com tempfile
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".pdf"
+                ) as tmp_pgr:
+                    tmp_pgr.write(pgr_file.getbuffer())
+                    pgr_path = tmp_pgr.name
 
-                with open("temp_pcmso.pdf", "wb") as f:
-                    f.write(pcmso_file.getbuffer())
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".pdf"
+                ) as tmp_pcmso:
+                    tmp_pcmso.write(pcmso_file.getbuffer())
+                    pcmso_path = tmp_pcmso.name
 
                 # Upload dos PDFs para a API Gemini
-                up_pgr = client.files.upload(file="temp_pgr.pdf")
-                up_pcmso = client.files.upload(file="temp_pcmso.pdf")
+                up_pgr = client.files.upload(file=pgr_path)
+                up_pcmso = client.files.upload(file=pcmso_path)
 
                 # Prompt especializado para SST
                 prompt_sistema = f"""
@@ -111,7 +118,7 @@ if btn_analisar:
                 4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
                 """
 
-                # Executa a geração de conteúdo
+                # Executa a geração de conteúdo com o modelo Gemini 2.5 Pro
                 response = client.models.generate_content(
                     model="gemini-2.5-pro",
                     contents=[up_pgr, up_pcmso, prompt_sistema],
@@ -124,7 +131,7 @@ if btn_analisar:
                 st.markdown("### 📋 Parecer Técnico e Análise de Conformidade")
                 st.write(resultado_texto)
 
-                # Verifica se há código HTML na resposta para conversão em PDF
+                # Verifica se há código HTML na resposta para conversão em PDF via WeasyPrint
                 if "```html" in resultado_texto:
                     html_code = (
                         resultado_texto.split("```html")[1]
@@ -132,7 +139,7 @@ if btn_analisar:
                         .strip()
                     )
 
-                    # Gera o PDF via xhtml2pdf
+                    # Gera o PDF usando a função WeasyPrint
                     pdf_bytes = converter_html_para_pdf(html_code)
 
                     if pdf_bytes:
@@ -144,14 +151,10 @@ if btn_analisar:
                             file_name="Apendice_Corrigido_SST.pdf",
                             mime="application/pdf",
                         )
-                    else:
-                        st.warning(
-                            "Ocorreu um erro ao converter o HTML para PDF."
-                        )
 
-                # Limpeza de arquivos temporários locais e na nuvem do Gemini
-                os.remove("temp_pgr.pdf")
-                os.remove("temp_pcmso.pdf")
+                # Limpeza de arquivos temporários locais e registros na API do Gemini
+                os.remove(pgr_path)
+                os.remove(pcmso_path)
                 client.files.delete(name=up_pgr.name)
                 client.files.delete(name=up_pcmso.name)
 
