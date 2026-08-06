@@ -1,7 +1,8 @@
 import asyncio
 import os
 import subprocess
-import google.generativeai as genai
+from openai import OpenAI
+from pypdf import PdfReader
 import streamlit as st
 
 # Configuração da página do Streamlit
@@ -22,10 +23,25 @@ def instalar_playwright_chromium():
             capture_output=True,
         )
     except Exception as e:
-        st.error(f"Erro ao instalar o Chromium para o Playwright: {e}")
+        st.error(f"Erro ao instalar o Chromium: {e}")
 
 
 instalar_playwright_chromium()
+
+
+# Função para extrair texto de PDF em memória
+def extrair_texto_pdf(pdf_file):
+    try:
+        reader = PdfReader(pdf_file)
+        texto = ""
+        for page in reader.pages:
+            t = page.extract_text()
+            if t:
+                texto += t + "\n"
+        return texto
+    except Exception as e:
+        st.error(f"Erro ao ler PDF: {e}")
+        return ""
 
 
 # Função assíncrona para gerar PDF via Playwright
@@ -54,21 +70,19 @@ async def gerar_pdf_playwright_async(html_code: str) -> bytes:
         return pdf_bytes
 
 
-# Wrapper síncrono para o Streamlit
 def gerar_pdf_playwright(html_code: str) -> bytes:
     return asyncio.run(gerar_pdf_playwright_async(html_code))
 
 
-# Painel Lateral
+# Interface
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
-    "**Sistema de Gestão de Auditoria de SST**\n\n"
-    "Análise automatizada de ressalvas de PGR e PCMSO com foco em Riscos Psicossociais (NR-01, NR-07, NR-17)."
+    "**Sistema de Gestão de Auditoria de SST**\n\nMotor de IA: **DeepSeek API**"
 )
 
-st.title("🛡️ Análise Automatizada de Auditorias de SST")
+st.title("🛡️ Análise Automatizada de Auditorias de SST (DeepSeek)")
 st.markdown(
-    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas da auditoria."
+    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas."
 )
 
 col1, col2 = st.columns(2)
@@ -89,74 +103,79 @@ ressalvas_text = st.text_area(
     placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário de Riscos Ocupacionais...",
 )
 
-btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Resposta")
+btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Resposta com DeepSeek")
 
 if btn_analisar:
-    # 1. Recupera a chave dos Secrets do Streamlit ou do ambiente
-    final_api_key = ""
-    if "GEMINI_API_KEY" in st.secrets:
-        final_api_key = str(st.secrets["GEMINI_API_KEY"]).strip()
+    # 1. Busca a chave do DeepSeek dos Secrets ou Ambiente
+    api_key = ""
+    if "DEEPSEEK_API_KEY" in st.secrets:
+        api_key = str(st.secrets["DEEPSEEK_API_KEY"]).strip()
     else:
-        final_api_key = str(os.environ.get("GEMINI_API_KEY", "")).strip()
+        api_key = str(os.environ.get("DEEPSEEK_API_KEY", "")).strip()
 
-    if not final_api_key:
+    if not api_key:
         st.error(
-            "⚠️ Nenhuma chave de API configurada! Adicione `GEMINI_API_KEY` nos Secrets do Streamlit Cloud."
+            "⚠️ Nenhuma chave do DeepSeek configurada! Adicione `DEEPSEEK_API_KEY` nos Secrets do Streamlit Cloud."
         )
     elif not pgr_file or not pcmso_file:
-        st.error(
-            "⚠️ É obrigatório enviar ambos os arquivos (PGR e PCMSO) para análise!"
-        )
+        st.error("⚠️ É obrigatório enviar ambos os arquivos (PGR e PCMSO)!")
     elif not ressalvas_text.strip():
         st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
     else:
         with st.spinner(
-            "⏳ Processando documentos e executando análise técnica..."
+            "⏳ Lendo documentos e enviando para a API do DeepSeek..."
         ):
             try:
-                # Configuração Direta e Sem Fallback da API
-                genai.configure(api_key=final_api_key)
+                # Extrai os textos dos PDFs
+                texto_pgr = extrair_texto_pdf(pgr_file)
+                texto_pcmso = extrair_texto_pdf(pcmso_file)
 
-                # Prepara os PDFs diretamente da memória como partes nativas da API
-                pgr_part = {
-                    "mime_type": "application/pdf",
-                    "data": pgr_file.getvalue(),
-                }
+                # Inicializa o cliente apontando para o servidor do DeepSeek
+                client = OpenAI(
+                    api_key=api_key, base_url="https://api.deepseek.com"
+                )
 
-                pcmso_part = {
-                    "mime_type": "application/pdf",
-                    "data": pcmso_file.getvalue(),
-                }
-
-                prompt_sistema = f"""
+                prompt_completo = f"""
                 Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, NR-20, NR-35, eSocial).
 
-                Sua missão é analisar as RESSALVAS/GLOSAS emitidas pela auditoria de terceiros e confrontá-las diretamente com os documentos anexados (PGR e PCMSO).
+                Sua missão é analisar as RESSALVAS/GLOSAS emitidas pela auditoria de terceiros e confrontá-las diretamente com o texto do PGR e PCMSO fornecidos abaixo.
 
-                TEXTO DAS RESSALVAS/GLOSAS DA AUDITORIA:
+                --- CONTEÚDO EXTRAÍDO DO PGR ---
+                {texto_pgr[:40000]}
+
+                --- CONTEÚDO EXTRAÍDO DO PCMSO ---
+                {texto_pcmso[:40000]}
+
+                --- TEXTO DAS RESSALVAS/GLOSAS DA AUDITORIA ---
                 {ressalvas_text}
 
                 INSTRUÇÕES DE RESPOSTA:
-                1. Analise criticamente se as ressalvas são PROCEDENTES ou IMPROCEDENTES consultando os PDFs enviados.
+                1. Analise criticamente se as ressalvas são PROCEDENTES ou IMPROCEDENTES consultando os textos do PGR e PCMSO.
                 2. Gere um PARECER TÉCNICO DE CONTESTAÇÃO E RESPOSTA completo e fundamentado, citando os itens e a legislação vigente (especialmente a transição e regras de Riscos Psicossociais da NR-01 e NR-17).
                 3. Se a ressalva exigir a entrega ou reestruturação de um documento, apêndice ou tabela (ex: Inventário de Riscos/Apêndice A), forneça o código HTML5 e CSS3 (inline/style) COMPLETO e formatado para impressão A4 ao final do seu parecer.
                 4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
                 """
 
-                # Utiliza o modelo gemini-2.5-flash com a SDK nativa e estável
-                model = genai.GenerativeModel("gemini-2.5-flash")
-                response = model.generate_content(
-                    [pgr_part, pcmso_part, prompt_sistema]
+                # Faz a chamada para a API do DeepSeek
+                response = client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Você é um especialista em auditorias e normas de Segurança e Saúde no Trabalho (SST).",
+                        },
+                        {"role": "user", "content": prompt_completo},
+                    ],
+                    stream=False,
                 )
 
-                resultado_texto = response.text
+                resultado_texto = response.choices[0].message.content
 
-                # Exibe a resposta
-                st.success("✅ Análise concluída com sucesso!")
+                st.success("✅ Análise concluída com sucesso via DeepSeek!")
                 st.markdown("### 📋 Parecer Técnico e Análise de Conformidade")
                 st.write(resultado_texto)
 
-                # Se a resposta contiver bloco de código HTML, gera o PDF
+                # Processamento do PDF via Playwright caso a IA tenha retornado HTML
                 if "```html" in resultado_texto:
                     html_code = (
                         resultado_texto.split("```html")[1]
@@ -164,7 +183,9 @@ if btn_analisar:
                         .strip()
                     )
 
-                    with st.spinner("📄 Gerando PDF via Chromium Playwright..."):
+                    with st.spinner(
+                        "📄 Gerando PDF formatado via Chromium..."
+                    ):
                         pdf_bytes = gerar_pdf_playwright(html_code)
 
                     if pdf_bytes:
@@ -178,4 +199,4 @@ if btn_analisar:
                         )
 
             except Exception as e:
-                st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
+                st.error(f"❌ Ocorreu um erro no DeepSeek: {str(e)}")
