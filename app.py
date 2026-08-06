@@ -6,12 +6,6 @@ from google import genai
 from google.genai import types
 import streamlit as st
 
-# ==============================================================================
-# CONFIGURAÇÃO DA CHAVE DA API FIXA NO CÓDIGO
-# Insira sua chave Gemini dentro das aspas abaixo:
-API_KEY_FIXA = "AQ.Ab8RN6LVrpAvsn2WJaHvlt1Tr66kIBI34maBbQ93dpCBmurKFA"
-# ==============================================================================
-
 # Configuração da página do Streamlit
 st.set_page_config(
     page_title="Sistema de Contestação e Ajustes de SST",
@@ -20,7 +14,7 @@ st.set_page_config(
 )
 
 
-# Garante que o Chromium do Playwright esteja instalado
+# Garante que o navegador Chromium do Playwright esteja instalado
 @st.cache_resource
 def instalar_playwright_chromium():
     try:
@@ -36,7 +30,7 @@ def instalar_playwright_chromium():
 instalar_playwright_chromium()
 
 
-# Função assíncrona para gerar PDF via Playwright
+# Função assíncrona para gerar PDF via Playwright (Chromium Headless)
 async def gerar_pdf_playwright_async(html_code: str) -> bytes:
     from playwright.async_api import async_playwright
 
@@ -45,8 +39,11 @@ async def gerar_pdf_playwright_async(html_code: str) -> bytes:
             headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         page = await browser.new_page()
+
+        # Carrega o HTML na página do Chromium
         await page.set_content(html_code, wait_until="networkidle")
 
+        # Configura a impressão em PDF no padrão A4
         pdf_bytes = await page.pdf(
             format="A4",
             print_background=True,
@@ -62,9 +59,17 @@ async def gerar_pdf_playwright_async(html_code: str) -> bytes:
         return pdf_bytes
 
 
+# Wrapper síncrono para o Streamlit
 def gerar_pdf_playwright(html_code: str) -> bytes:
     return asyncio.run(gerar_pdf_playwright_async(html_code))
 
+
+# Barra Lateral - Informações
+st.sidebar.title("⚙️ Painel do Sistema")
+st.sidebar.info(
+    "**Sistema de Gestão de Auditoria de SST**\n\n"
+    "Análise automatizada de ressalvas de PGR e PCMSO integrada com a nova regulamentação de Riscos Psicossociais (NR-01, NR-07, NR-17)."
+)
 
 # Título Principal
 st.title("🛡️ Análise Automatizada de Auditorias de SST")
@@ -95,12 +100,16 @@ btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Resposta")
 
 # Processamento da análise
 if btn_analisar:
-    # Determina a chave (prioriza a chave fixa ou o segredo do ambiente)
-    final_api_key = API_KEY_FIXA or os.environ.get("GEMINI_API_KEY", "")
+    # Busca a chave de API nos Secrets do Streamlit Cloud ou nas variáveis de ambiente
+    final_api_key = ""
+    if "GEMINI_API_KEY" in st.secrets:
+        final_api_key = st.secrets["GEMINI_API_KEY"]
+    else:
+        final_api_key = os.environ.get("GEMINI_API_KEY", "")
 
-    if not final_api_key or final_api_key == "SUA_CHAVE_GEMINI_AQUI":
+    if not final_api_key:
         st.error(
-            "⚠️ Por favor, cole sua GEMINI_API_KEY na variável `API_KEY_FIXA` no topo do arquivo `app.py`!"
+            "⚠️ Nenhuma chave de API configurada! Adicione `GEMINI_API_KEY` nos Secrets do Streamlit Cloud."
         )
     elif not pgr_file or not pcmso_file:
         st.error(
@@ -113,9 +122,10 @@ if btn_analisar:
             "⏳ Enviando documentos para a IA e processando análise técnica..."
         ):
             try:
+                # Inicializa o cliente oficial do Google GenAI passando a chave explicitamente
                 client = genai.Client(api_key=final_api_key)
 
-                # Cria arquivos temporários
+                # Cria arquivos temporários no servidor para subir para a API
                 with tempfile.NamedTemporaryFile(
                     delete=False, suffix=".pdf"
                 ) as tmp_pgr:
@@ -128,7 +138,7 @@ if btn_analisar:
                     tmp_pcmso.write(pcmso_file.getbuffer())
                     pcmso_path = tmp_pcmso.name
 
-                # Upload dos PDFs para a API
+                # Upload dos PDFs para a API Gemini
                 up_pgr = client.files.upload(file=pgr_path)
                 up_pcmso = client.files.upload(file=pcmso_path)
 
@@ -147,7 +157,7 @@ if btn_analisar:
                 4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
                 """
 
-                # ALTERADO PARA gemini-2.5-flash PARA EVITAR ERRO DE COTA/429
+                # Modelo gemini-2.5-flash para alta velocidade e cota de limite estendida
                 response = client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=[up_pgr, up_pcmso, prompt_sistema],
@@ -160,7 +170,7 @@ if btn_analisar:
                 st.markdown("### 📋 Parecer Técnico e Análise de Conformidade")
                 st.write(resultado_texto)
 
-                # Se houver HTML na resposta, gera o PDF
+                # Se houver bloco HTML na resposta, gera o PDF usando o Playwright
                 if "```html" in resultado_texto:
                     html_code = (
                         resultado_texto.split("```html")[1]
@@ -181,7 +191,7 @@ if btn_analisar:
                             mime="application/pdf",
                         )
 
-                # Limpeza de arquivos temporários
+                # Limpeza de arquivos temporários locais e remoção do bucket da API
                 os.remove(pgr_path)
                 os.remove(pcmso_path)
                 client.files.delete(name=up_pgr.name)
