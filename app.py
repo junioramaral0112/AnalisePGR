@@ -105,15 +105,7 @@ if submit:
                 st.error(f"Erro ao enviar arquivos para GenAI: {e}")
                 raise
 
-            # Prompt para Gemini
-            prompt = f"""
-Você é um Médico do Trabalho e Engenheiro de Segurança do Trabalho Sênior. Analise criticamente as ressalvas abaixo, confrontando-as com as Normas Regulamentadoras NR-01, NR-07, NR-17, NR-20 e NR-35, e com o conteúdo dos PDFs anexados (PGR e PCMSO). Seja técnico, objetivo e rigoroso. Para cada ressalva:
-- Indique se é procedente, parcialmente procedente ou improcedente.
-- Fundamente a conclusão citando trechos e requisitos aplicáveis das NRs indicadas.
-- Aponte exatamente qual parte do PGR/PCMSO (se aplicável) necessita ajuste, e descreva a correção técnica necessária.
-- Gere um Parecer Técnico de Contestação bem estruturado (resumo executivo, fundamentos técnicos, conclusão).
-- Se for necessário ajustar ou gerar algum apêndice/documento (ex.: inventário de agentes, plano de ação, mapa de risco, formulário), gere o código HTML5/CSS3 completo do Apêndice/Documento entre tags ```html ... ``` seguindo boas práticas de HTML sem depender de frameworks externos. O HTML deve ser pronto para conversão direta para PDF.
-
-Dados:
-- Arquivos PGR e PCMSO: enviados como anexos (iden
-
+            # Monta prompt sem usar um único triple-quoted f-string (evita erros de terminação)
+            prompt_parts = []
+            prompt_parts.append("Você é um Médico do Trabalho e Engenheiro de Segurança do Trabalho Sênior. ")
+            prompt_parts.ap
