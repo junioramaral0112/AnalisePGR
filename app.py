@@ -1,8 +1,7 @@
 import asyncio
 import os
 import subprocess
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 import streamlit as st
 
 # Configuração da página do Streamlit
@@ -13,7 +12,7 @@ st.set_page_config(
 )
 
 
-# Garante que o navegador Chromium do Playwright esteja instalado
+# Garante a instalação do Chromium no Playwright
 @st.cache_resource
 def instalar_playwright_chromium():
     try:
@@ -29,7 +28,7 @@ def instalar_playwright_chromium():
 instalar_playwright_chromium()
 
 
-# Função assíncrona para gerar PDF via Playwright (Chromium Headless)
+# Função assíncrona para gerar PDF via Playwright
 async def gerar_pdf_playwright_async(html_code: str) -> bytes:
     from playwright.async_api import async_playwright
 
@@ -38,11 +37,8 @@ async def gerar_pdf_playwright_async(html_code: str) -> bytes:
             headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         page = await browser.new_page()
-
-        # Carrega o HTML na página do Chromium
         await page.set_content(html_code, wait_until="networkidle")
 
-        # Configura a impressão em PDF no padrão A4
         pdf_bytes = await page.pdf(
             format="A4",
             print_background=True,
@@ -63,20 +59,18 @@ def gerar_pdf_playwright(html_code: str) -> bytes:
     return asyncio.run(gerar_pdf_playwright_async(html_code))
 
 
-# Barra Lateral - Informações
+# Painel Lateral
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
     "**Sistema de Gestão de Auditoria de SST**\n\n"
-    "Análise automatizada de ressalvas de PGR e PCMSO integrada com a nova regulamentação de Riscos Psicossociais (NR-01, NR-07, NR-17)."
+    "Análise automatizada de ressalvas de PGR e PCMSO com foco em Riscos Psicossociais (NR-01, NR-07, NR-17)."
 )
 
-# Título Principal
 st.title("🛡️ Análise Automatizada de Auditorias de SST")
 st.markdown(
     "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas da auditoria."
 )
 
-# Formulário de entrada de dados
 col1, col2 = st.columns(2)
 
 with col1:
@@ -97,9 +91,8 @@ ressalvas_text = st.text_area(
 
 btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Resposta")
 
-# Processamento da análise
 if btn_analisar:
-    # 1. Recupera a chave de API (Secrets do Streamlit ou variável de ambiente)
+    # 1. Recupera a chave dos Secrets do Streamlit ou do ambiente
     final_api_key = ""
     if "GEMINI_API_KEY" in st.secrets:
         final_api_key = str(st.secrets["GEMINI_API_KEY"]).strip()
@@ -121,19 +114,19 @@ if btn_analisar:
             "⏳ Processando documentos e executando análise técnica..."
         ):
             try:
-                # Instancia o cliente especificando a API Key
-                client = genai.Client(api_key=final_api_key)
+                # Configuração Direta e Sem Fallback da API
+                genai.configure(api_key=final_api_key)
 
-                # Converte os arquivos PDF diretamente em bytes para o prompt (Sem usar File API)
-                pgr_part = types.Part.from_bytes(
-                    data=pgr_file.getvalue(),
-                    mime_type="application/pdf",
-                )
+                # Prepara os PDFs diretamente da memória como partes nativas da API
+                pgr_part = {
+                    "mime_type": "application/pdf",
+                    "data": pgr_file.getvalue(),
+                }
 
-                pcmso_part = types.Part.from_bytes(
-                    data=pcmso_file.getvalue(),
-                    mime_type="application/pdf",
-                )
+                pcmso_part = {
+                    "mime_type": "application/pdf",
+                    "data": pcmso_file.getvalue(),
+                }
 
                 prompt_sistema = f"""
                 Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, NR-20, NR-35, eSocial).
@@ -150,20 +143,20 @@ if btn_analisar:
                 4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
                 """
 
-                # Executa a geração usando Gemini 2.5 Flash diretamente com os bytes dos PDFs
-                response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=[pgr_part, pcmso_part, prompt_sistema],
+                # Utiliza o modelo gemini-2.5-flash com a SDK nativa e estável
+                model = genai.GenerativeModel("gemini-2.5-flash")
+                response = model.generate_content(
+                    [pgr_part, pcmso_part, prompt_sistema]
                 )
 
                 resultado_texto = response.text
 
-                # Exibe o parecer técnico na tela
+                # Exibe a resposta
                 st.success("✅ Análise concluída com sucesso!")
                 st.markdown("### 📋 Parecer Técnico e Análise de Conformidade")
                 st.write(resultado_texto)
 
-                # Se houver bloco HTML na resposta, gera o PDF usando o Playwright
+                # Se a resposta contiver bloco de código HTML, gera o PDF
                 if "```html" in resultado_texto:
                     html_code = (
                         resultado_texto.split("```html")[1]
