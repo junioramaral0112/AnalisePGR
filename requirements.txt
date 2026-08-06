@@ -1,4 +1,4 @@
 streamlit
 openai
-playwright
+python-docx
 pypdf
