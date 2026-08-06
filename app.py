@@ -1,7 +1,6 @@
 import asyncio
 import os
 import subprocess
-import tempfile
 from google import genai
 from google.genai import types
 import streamlit as st
@@ -100,12 +99,12 @@ btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Resposta")
 
 # Processamento da análise
 if btn_analisar:
-    # Busca a chave de API nos Secrets do Streamlit Cloud ou nas variáveis de ambiente
+    # 1. Recupera a chave de API (Secrets do Streamlit ou variável de ambiente)
     final_api_key = ""
     if "GEMINI_API_KEY" in st.secrets:
-        final_api_key = st.secrets["GEMINI_API_KEY"]
+        final_api_key = str(st.secrets["GEMINI_API_KEY"]).strip()
     else:
-        final_api_key = os.environ.get("GEMINI_API_KEY", "")
+        final_api_key = str(os.environ.get("GEMINI_API_KEY", "")).strip()
 
     if not final_api_key:
         st.error(
@@ -119,28 +118,22 @@ if btn_analisar:
         st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
     else:
         with st.spinner(
-            "⏳ Enviando documentos para a IA e processando análise técnica..."
+            "⏳ Processando documentos e executando análise técnica..."
         ):
             try:
-                # Inicializa o cliente oficial do Google GenAI passando a chave explicitamente
+                # Instancia o cliente especificando a API Key
                 client = genai.Client(api_key=final_api_key)
 
-                # Cria arquivos temporários no servidor para subir para a API
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".pdf"
-                ) as tmp_pgr:
-                    tmp_pgr.write(pgr_file.getbuffer())
-                    pgr_path = tmp_pgr.name
+                # Converte os arquivos PDF diretamente em bytes para o prompt (Sem usar File API)
+                pgr_part = types.Part.from_bytes(
+                    data=pgr_file.getvalue(),
+                    mime_type="application/pdf",
+                )
 
-                with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".pdf"
-                ) as tmp_pcmso:
-                    tmp_pcmso.write(pcmso_file.getbuffer())
-                    pcmso_path = tmp_pcmso.name
-
-                # Upload dos PDFs para a API Gemini
-                up_pgr = client.files.upload(file=pgr_path)
-                up_pcmso = client.files.upload(file=pcmso_path)
+                pcmso_part = types.Part.from_bytes(
+                    data=pcmso_file.getvalue(),
+                    mime_type="application/pdf",
+                )
 
                 prompt_sistema = f"""
                 Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, NR-20, NR-35, eSocial).
@@ -157,10 +150,10 @@ if btn_analisar:
                 4. SE GERAR CÓDIGO HTML, OBLIGATORIAMENTE coloque o código estritamente entre as tags ```html e ```.
                 """
 
-                # Modelo gemini-2.5-flash para alta velocidade e cota de limite estendida
+                # Executa a geração usando Gemini 2.5 Flash diretamente com os bytes dos PDFs
                 response = client.models.generate_content(
                     model="gemini-2.5-flash",
-                    contents=[up_pgr, up_pcmso, prompt_sistema],
+                    contents=[pgr_part, pcmso_part, prompt_sistema],
                 )
 
                 resultado_texto = response.text
@@ -190,12 +183,6 @@ if btn_analisar:
                             file_name="Apendice_Corrigido_SST.pdf",
                             mime="application/pdf",
                         )
-
-                # Limpeza de arquivos temporários locais e remoção do bucket da API
-                os.remove(pgr_path)
-                os.remove(pcmso_path)
-                client.files.delete(name=up_pgr.name)
-                client.files.delete(name=up_pcmso.name)
 
             except Exception as e:
                 st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
