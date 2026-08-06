@@ -4,27 +4,57 @@ from docx import Document
 from docx.enum.section import WD_ORIENT, WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement, parse_xml
-from docx.oxml.ns import qn, nsdecls
+from docx.oxml.ns import nsdecls, qn
 from docx.shared import Inches, Pt, RGBColor
 from openai import OpenAI
 from pypdf import PdfReader
 import streamlit as st
 
-# Configuração da página do Streamlit
+# Configuração da página
 st.set_page_config(
-    page_title="Sistema de Contestação e Ajustes de SST",
+    page_title="AuditGuard SST — Inteligência em Contestações",
     page_icon="🛡️",
     layout="wide",
 )
 
-# Inicializa o session_state para manter a tela e os downloads fixos
+# Estilização de Fundo Corporativo e Visual do App via CSS
+st.markdown(
+    """
+    <style>
+    /* Fundo com gradiente sutil sobre textura tecnológica */
+    .stApp {
+        background: linear-gradient(rgba(248, 249, 250, 0.93), rgba(248, 249, 250, 0.93)),
+                    url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=2070');
+        background-size: cover;
+        background-attachment: fixed;
+    }
+    
+    /* Destaques de títulos */
+    h1 {
+        color: #003366 !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Suavização de botões */
+    .stButton>button {
+        border-radius: 8px;
+        background-color: #003366;
+        color: white;
+        font-weight: bold;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Persistência da sessão
 if "docx_bytes" not in st.session_state:
     st.session_state.docx_bytes = None
 if "texto_resposta" not in st.session_state:
     st.session_state.texto_resposta = None
 
 
-# Extração de texto dos PDFs
+# Leitura dos PDFs
 def extrair_texto_pdf(pdf_file):
     try:
         reader = PdfReader(pdf_file)
@@ -39,21 +69,19 @@ def extrair_texto_pdf(pdf_file):
         return ""
 
 
-# Função auxiliar para aplicar cor de fundo em células do Word
+# Aplica cor de fundo em células do Word
 def set_cell_background(cell, fill_hex):
     tcPr = cell._tc.get_or_add_tcPr()
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
     tcPr.append(shd)
 
 
-# Converte texto Markdown em um documento Word (.docx) formatado em Paisagem com tabelas coloridas
+# Gera Word Paisagem com tabelas coloridas
 def converter_markdown_para_word_paisagem(texto_markdown):
     doc = Document()
 
-    # 1. Configura a página para A4 PAISAGEM (Landscape)
     section = doc.sections[0]
     section.orientation = WD_ORIENT.LANDSCAPE
-    # Inverte as dimensões A4 (29,7 cm x 21,0 cm)
     new_width, new_height = section.page_height, section.page_width
     section.page_width = new_width
     section.page_height = new_height
@@ -62,7 +90,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
     section.left_margin = Inches(0.5)
     section.right_margin = Inches(0.5)
 
-    # Configuração global de fonte
     style = doc.styles["Normal"]
     font = style.font
     font.name = "Calibri"
@@ -77,7 +104,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
         if not linha_str:
             continue
 
-        # Título Principal (#)
         if linha_str.startswith("# "):
             titulo_limpo = linha_str.replace("# ", "").strip()
             p = doc.add_paragraph()
@@ -87,7 +113,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
             run.font.size = Pt(15)
             run.font.color.rgb = RGBColor(0, 51, 102)
 
-        # Subtítulos (## ou ###)
         elif linha_str.startswith("##"):
             sub_limpo = linha_str.lstrip("#").strip()
             p = doc.add_paragraph()
@@ -96,21 +121,17 @@ def converter_markdown_para_word_paisagem(texto_markdown):
             run.font.size = Pt(12)
             run.font.color.rgb = RGBColor(0, 102, 153)
 
-        # Processamento de Tabelas (| Coluna | Coluna |)
         elif linha_str.startswith("|") and linha_str.endswith("|"):
             colunas = [c.strip() for c in linha_str.split("|")[1:-1]]
 
-            # Descarta linhas separadoras (|---|---|)
             if all(set(c) <= set("-: ") for c in colunas):
                 continue
 
-            # Início de uma nova tabela
             if tabela_atual is None:
                 row_count = 0
                 tabela_atual = doc.add_table(rows=1, cols=len(colunas))
                 tabela_atual.style = "Table Grid"
 
-                # Formata Cabeçalho: Fundo Azul Escuro (003366) e Texto Branco/Negrito
                 hdr_cells = tabela_atual.rows[0].cells
                 for i, col_texto in enumerate(colunas):
                     hdr_cells[i].text = col_texto
@@ -123,8 +144,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
             else:
                 row_count += 1
                 row_cells = tabela_atual.add_row().cells
-
-                # Efeito Zebrado: linhas pares com fundo suave (F2F4F8)
                 cor_fundo = "F2F4F8" if row_count % 2 == 0 else "FFFFFF"
 
                 for i, col_texto in enumerate(colunas):
@@ -137,8 +156,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
         else:
             tabela_atual = None
             p = doc.add_paragraph()
-
-            # Trata negritos (**texto**)
             partes = linha_str.split("**")
             for idx, parte in enumerate(partes):
                 run = p.add_run(parte)
@@ -151,15 +168,30 @@ def converter_markdown_para_word_paisagem(texto_markdown):
     return buffer.getvalue()
 
 
-# Interface do Usuário
+# Sidebar com a Logo do Repositório do GitHub (raw asset)
+LOGO_URL = "https://raw.githubusercontent.com/junioramaral0112/AnalisePGR/main/logo.png"
+
+st.sidebar.image(LOGO_URL, width=220)
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
-    "**Sistema de Gestão de SST & Auditoria**\n\nMotor de IA: **DeepSeek API**"
+    "**AuditGuard SST**\n\nInteligência e Gestão de Auditoria de SST integradas via **DeepSeek API**."
 )
 
-st.title("🛡️ Análise Automatizada de Auditorias de SST")
+# Cabeçalho Principal com Logo e Nome Comercial
+col_logo, col_titulo = st.columns([1, 5])
+
+with col_logo:
+    st.image(LOGO_URL, width=110)
+
+with col_titulo:
+    st.title("AuditGuard SST")
+    st.markdown(
+        "**Plataforma de Inteligência em Contestações de Auditoria e Apêndices Normativos**"
+    )
+
+st.markdown("---")
 st.markdown(
-    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas."
+    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas da auditoria."
 )
 
 col1, col2 = st.columns(2)
@@ -180,7 +212,7 @@ ressalvas_text = st.text_area(
     placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário de Riscos Ocupacionais...",
 )
 
-btn_analisar = st.button("🚀 Analisar Ressalvas e Gerar Documento Completo")
+btn_analisar = st.button("🚀 Analisar Ressalvas com AuditGuard SST")
 
 if btn_analisar:
     api_key = ""
@@ -199,7 +231,7 @@ if btn_analisar:
         st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
     else:
         with st.spinner(
-            "⏳ Processando documentos e montando o relatório técnico em Word..."
+            "⏳ Processando documentos e montando a contestação em Word..."
         ):
             try:
                 texto_pgr = extrair_texto_pdf(pgr_file)
@@ -212,7 +244,7 @@ if btn_analisar:
                 prompt_completo = f"""
                 Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, eSocial).
 
-                Sua missão é emitir um ÚNICO DOCUMENTO COMPLETO contendo o Parecer Técnico e a revisão integral dos Apêndices A e B.
+                Sua missão é emitir um ÚNICO DOCUMENTO COMPLETO contendo o Parecer Técnico de Contestação de SST e a revisão integral dos Apêndices A e B.
 
                 --- CONTEÚDO DO PGR ---
                 {texto_pgr[:40000]}
@@ -225,7 +257,7 @@ if btn_analisar:
 
                 ESTRUTURA OBRIGATÓRIA DO DOCUMENTO:
 
-                # PARECER TÉCNICO DE CONTESTAÇÃO DE SST
+                # PARECER TÉCNICO DE CONTESTAÇÃO DE SST — AUDITGUARD
                 1. **Objeto e Finalidade:** Descrição completa dos documentos auditados.
                 2. **Análise Crítica das Ressalvas:** Parecer detalhado se é Procedente ou Improcedente para cada ressalva informada.
                 3. **Fundamentação Legal:** Citar NR-01, NR-07, NR-17 e regras de transição.
@@ -244,7 +276,7 @@ if btn_analisar:
                     messages=[
                         {
                             "role": "system",
-                            "content": "Você é um especialista em elaboração de laudos de SST e tabelas técnicas em Markdown.",
+                            "content": "Você é o motor de inteligência do AuditGuard SST.",
                         },
                         {"role": "user", "content": prompt_completo},
                     ],
@@ -253,31 +285,27 @@ if btn_analisar:
 
                 texto_resposta = response.choices[0].message.content
 
-                # Converte o relatório formatado em Word Paisagem com Tabelas Coloridas
                 bytes_word = converter_markdown_para_word_paisagem(
                     texto_resposta
                 )
 
-                # Grava no session_state para manter o estado e os botões ativos
                 st.session_state.texto_resposta = texto_resposta
                 st.session_state.docx_bytes = bytes_word
 
-                st.success(
-                    "✅ Relatório e Apêndice gerados com sucesso no Word!"
-                )
+                st.success("✅ Contestação e Apêndice gerados com sucesso!")
 
             except Exception as e:
                 st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
 
-# Área fixa de Download e Pré-visualização
+# Downloads e visualização
 if st.session_state.docx_bytes and st.session_state.texto_resposta:
     st.markdown("---")
     st.markdown("### 📥 Baixar Relatório Formatado em Word")
 
     st.download_button(
-        label="📝 Baixar Parecer Técnico + Apêndice A e B (.docx - Paisagem)",
+        label="📝 Baixar Parecer Técnico + Apêndice A e B (.docx - AuditGuard)",
         data=st.session_state.docx_bytes,
-        file_name="Parecer_e_Apendice_SST_Paisagem.docx",
+        file_name="AuditGuard_Parecer_e_Apendice_SST.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
