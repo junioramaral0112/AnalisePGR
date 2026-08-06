@@ -1,111 +1,60 @@
 import os
-import tempfile
-import streamlit as st
 from google import genai
-from playwright.sync_api import sync_playwright, Error as PlaywrightError
-import subprocess
+from google.genai import types
+import weasyprint
 
-st.set_page_config(page_title="Sistema Automatizado de Contestação e Ajustes de Auditorias SST", layout="wide")
+# 1. Configurar a chave de API do Gemini
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
-# Sidebar / Config
-st.sidebar.title("Configuração")
-api_key_sidebar = st.sidebar.text_input("GEMINI_API_KEY", type="password", help="Informe a chave da API Gemini ou configure como Secret no Streamlit Cloud")
-st.sidebar.markdown("Versão: 1.0 — Suporte: equipe SST")
+def processar_auditoria_sst(caminho_pgr, caminho_pcmso, texto_ressalva):
+    print("Enviando documentos para análise da IA...")
+    
+    # Faz o upload dos arquivos PDF para a API do Gemini
+    file_pgr = client.files.upload(file=caminho_pgr)
+    file_pcmso = client.files.upload(file=caminho_pcmso)
 
-api_key = api_key_sidebar.strip() or os.environ.get("GEMINI_API_KEY", "")
-if not api_key:
-    st.sidebar.error("GEMINI_API_KEY ausente. Configure a variável de ambiente ou informe aqui.")
-    client = None
-else:
-    try:
-        genai.api_key = api_key
-        client = genai.Client()
-        st.sidebar.success("Chave configurada")
-    except Exception as e:
-        st.sidebar.error(f"Erro ao inicializar cliente GenAI: {e}")
-        client = None
+    prompt = f"""
+    Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Especialista em Auditorias de SST (NR-01, NR-07, NR-17, eSocial).
 
-st.title("Sistema Automatizado de Contestação e Ajustes de Auditorias SST")
+    Sua tarefa é analisar as RESSALVAS/INCONSISTÊNCIAS apontadas pela auditoria de terceiros e confrontá-las com os documentos anexados (PGR e PCMSO).
 
-# Form
-with st.form("main_form"):
-    st.markdown("Envie os PDFs do PGR e PCMSO (empresa) e cole as ressalvas/glosas da auditoria.")
-    pgr_file = st.file_uploader("PDF: PGR", type=["pdf"], key="pgr")
-    pcmsop_file = st.file_uploader("PDF: PCMSO", type=["pdf"], key="pcmsop")
-    ressalvas_text = st.text_area("Ressalvas/Glosas da Auditoria (cole aqui)", height=240)
-    submit = st.form_submit_button("Analisar Ressalvas e Gerar Parecer / Documentos")
+    TEXTO DAS RESSALVAS:
+    {texto_ressalva}
 
-output_container = st.container()
+    DIRETRIZES DE SAÍDA:
+    1. Se as ressalvas forem IMPROCEDENTES (ou seja, o PGR/PCMSO já atende), gere um PARECER TÉCNICO DE CONTESTAÇÃO fundamentado citando os itens do documento.
+    2. Se a ressalva exigir um novo documento/Apêndice corrigido, gere o PARECER TÉCNICO e, ao final, forneça o código HTML5/CSS3 completo do Apêndice/Documento pronto para impressão A4.
+    3. Se houver código HTML gerado, coloque-o estritamente entre as tags ```html e ```.
+    """
 
-# Utils
-def save_temp_file(uploaded_file):
-    t = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    t.write(uploaded_file.read())
-    t.flush()
-    t.close()
-    return t.name
+    # Chamada para o modelo
+    response = client.models.generate_content(
+        model='gemini-2.5-pro',
+        contents=[file_pgr, file_pcmso, prompt]
+    )
 
-def extract_html_from_text(text: str):
-    start_tag = "```html"
-    end_tag = "```"
-    s = text.find(start_tag)
-    if s == -1:
-        return None
-    s += len(start_tag)
-    e = text.find(end_tag, s)
-    if e == -1:
-        return None
-    return text[s:e].strip()
+    conteudo_resposta = response.text
+    print("\n--- RESPOSTA DA IA ---")
+    print(conteudo_resposta)
 
-def ensure_playwright_browsers():
-    try:
-        with sync_playwright() as p:
-            return True
-    except PlaywrightError:
-        try:
-            subprocess.check_call(["playwright", "install", "--with-deps"])
-            return True
-        except Exception:
-            return False
-    except Exception:
-        return False
+    # Verifica se a IA gerou um HTML para conversão em PDF
+    if "```html" in conteudo_resposta:
+        html_code = conteudo_resposta.split("```html")[1].split("```")[0].strip()
+        
+        # Salva o arquivo HTML
+        with open("Apendice_Corrigido.html", "w", encoding="utf-8") as f:
+            f.write(html_code)
+            
+        # Converte o HTML diretamente em PDF
+        weasyprint.HTML(string=html_code).write_pdf("Apendice_Corrigido.pdf")
+        print("\n✅ Sucesso! O arquivo 'Apendice_Corrigido.pdf' foi gerado automaticamente.")
 
-def html_to_pdf_bytes_playwright(html_code: str):
-    ok = ensure_playwright_browsers()
-    if not ok:
-        raise RuntimeError("Playwright browsers não instalados. No Streamlit Cloud, defina 'playwright install --with-deps' como Install command.")
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=["--no-sandbox"])
-        page = browser.new_page()
-        page.set_content(html_code, wait_until="networkidle")
-        pdf_bytes = page.pdf(format="A4", margin={"top":"10mm","bottom":"10mm","left":"10mm","right":"10mm"})
-        browser.close()
-        return pdf_bytes
+# Exemplo de uso:
+if __name__ == "__main__":
+    pgr_path = "PGR FEMSA SC 2026 Rev 01.pdf"
+    pcmso_path = "PCMSO FEMSA SC 2026 Rev 01.pdf"
+    ressalvas = """
+    Existem 1 ressalvas neste documento: os riscos psicossociais não constam no Inventário de Riscos Ocupacionais.
+    """
 
-# Main action
-if submit:
-    if client is None:
-        st.error("Cliente GenAI não inicializado. Verifique GEMINI_API_KEY.")
-    elif not pgr_file or not pcmsop_file or not ressalvas_text.strip():
-        st.error("Por favor, envie os dois PDFs e as ressalvas.")
-    else:
-        with st.spinner("Preparando arquivos e solicitando análise ao modelo Gemini..."):
-            try:
-                pgr_path = save_temp_file(pgr_file)
-                pcmsop_path = save_temp_file(pcmsop_file)
-            except Exception as e:
-                st.error(f"Erro salvando PDFs localmente: {e}")
-                raise
-
-            # Upload para GenAI
-            try:
-                resp_pgr = client.files.upload(file=open(pgr_path, "rb"), filename=os.path.basename(pgr_path))
-                resp_pcmsop = client.files.upload(file=open(pcmsop_path, "rb"), filename=os.path.basename(pcmsop_path))
-            except Exception as e:
-                st.error(f"Erro ao enviar arquivos para GenAI: {e}")
-                raise
-
-            # Monta prompt sem usar um único triple-quoted f-string (evita erros de terminação)
-            prompt_parts = []
-            prompt_parts.append("Você é um Médico do Trabalho e Engenheiro de Segurança do Trabalho Sênior. ")
-            prompt_parts.ap
+    processar_auditoria_sst(pgr_path, pcmso_path, ressalvas)
