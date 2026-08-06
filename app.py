@@ -1,8 +1,11 @@
 import io
 import os
 from docx import Document
+from docx.enum.section import WD_ORIENT, WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt, RGBColor
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import qn, nsdecls
+from docx.shared import Inches, Pt, RGBColor
 from openai import OpenAI
 from pypdf import PdfReader
 import streamlit as st
@@ -14,9 +17,11 @@ st.set_page_config(
     layout="wide",
 )
 
-# Inicializa a sessão para manter a tela e os downloads fixos
+# Inicializa o session_state para manter a tela e os downloads fixos
 if "docx_bytes" not in st.session_state:
     st.session_state.docx_bytes = None
+if "texto_resposta" not in st.session_state:
+    st.session_state.texto_resposta = None
 
 
 # Extração de texto dos PDFs
@@ -34,18 +39,38 @@ def extrair_texto_pdf(pdf_file):
         return ""
 
 
-# Converte texto Markdown estruturado em um documento Word (.docx) completo
-def converter_markdown_para_word(texto_markdown):
+# Função auxiliar para aplicar cor de fundo em células do Word
+def set_cell_background(cell, fill_hex):
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
+    tcPr.append(shd)
+
+
+# Converte texto Markdown em um documento Word (.docx) formatado em Paisagem com tabelas coloridas
+def converter_markdown_para_word_paisagem(texto_markdown):
     doc = Document()
 
-    # Configuração global da fonte
+    # 1. Configura a página para A4 PAISAGEM (Landscape)
+    section = doc.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    # Inverte as dimensões A4 (29,7 cm x 21,0 cm)
+    new_width, new_height = section.page_height, section.page_width
+    section.page_width = new_width
+    section.page_height = new_height
+    section.top_margin = Inches(0.5)
+    section.bottom_margin = Inches(0.5)
+    section.left_margin = Inches(0.5)
+    section.right_margin = Inches(0.5)
+
+    # Configuração global de fonte
     style = doc.styles["Normal"]
     font = style.font
     font.name = "Calibri"
-    font.size = Pt(10)
+    font.size = Pt(9.5)
 
     linhas = texto_markdown.split("\n")
     tabela_atual = None
+    row_count = 0
 
     for linha in linhas:
         linha_str = linha.strip()
@@ -59,7 +84,7 @@ def converter_markdown_para_word(texto_markdown):
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = p.add_run(titulo_limpo)
             run.bold = True
-            run.font.size = Pt(14)
+            run.font.size = Pt(15)
             run.font.color.rgb = RGBColor(0, 51, 102)
 
         # Subtítulos (## ou ###)
@@ -71,7 +96,7 @@ def converter_markdown_para_word(texto_markdown):
             run.font.size = Pt(12)
             run.font.color.rgb = RGBColor(0, 102, 153)
 
-        # Processamento de Tabelas em Markdown (| Coluna | Coluna |)
+        # Processamento de Tabelas (| Coluna | Coluna |)
         elif linha_str.startswith("|") and linha_str.endswith("|"):
             colunas = [c.strip() for c in linha_str.split("|")[1:-1]]
 
@@ -79,24 +104,36 @@ def converter_markdown_para_word(texto_markdown):
             if all(set(c) <= set("-: ") for c in colunas):
                 continue
 
+            # Início de uma nova tabela
             if tabela_atual is None:
+                row_count = 0
                 tabela_atual = doc.add_table(rows=1, cols=len(colunas))
                 tabela_atual.style = "Table Grid"
+
+                # Formata Cabeçalho: Fundo Azul Escuro (003366) e Texto Branco/Negrito
                 hdr_cells = tabela_atual.rows[0].cells
                 for i, col_texto in enumerate(colunas):
                     hdr_cells[i].text = col_texto
+                    set_cell_background(hdr_cells[i], "003366")
                     for p in hdr_cells[i].paragraphs:
                         for run in p.runs:
                             run.bold = True
                             run.font.size = Pt(9)
+                            run.font.color.rgb = RGBColor(255, 255, 255)
             else:
+                row_count += 1
                 row_cells = tabela_atual.add_row().cells
+
+                # Efeito Zebrado: linhas pares com fundo suave (F2F4F8)
+                cor_fundo = "F2F4F8" if row_count % 2 == 0 else "FFFFFF"
+
                 for i, col_texto in enumerate(colunas):
                     if i < len(row_cells):
                         row_cells[i].text = col_texto
+                        set_cell_background(row_cells[i], cor_fundo)
                         for p in row_cells[i].paragraphs:
                             for run in p.runs:
-                                run.font.size = Pt(9)
+                                run.font.size = Pt(8.5)
         else:
             tabela_atual = None
             p = doc.add_paragraph()
@@ -114,7 +151,7 @@ def converter_markdown_para_word(texto_markdown):
     return buffer.getvalue()
 
 
-# Interface
+# Interface do Usuário
 st.sidebar.title("⚙️ Painel do Sistema")
 st.sidebar.info(
     "**Sistema de Gestão de SST & Auditoria**\n\nMotor de IA: **DeepSeek API**"
@@ -194,7 +231,7 @@ if btn_analisar:
                 3. **Fundamentação Legal:** Citar NR-01, NR-07, NR-17 e regras de transição.
 
                 ## APÊNDICE A – INVENTÁRIO DE RISCOS OCUPACIONAIS CONSOLIDADO
-                Forneça a TABELA MARKDOWN COMPLETA preenchendo detalhadamente as 9 colunas para todos os riscos encontrados no PGR/PCMSO, INCLUINDO OS RISCOS PSICOSSOCIAIS:
+                Forneça a TABELA MARKDOWN COMPLETA preenchendo detalhadamente as 10 colunas para todos os riscos encontrados no PGR/PCMSO, INCLUINDO OS RISCOS PSICOSSOCIAIS:
                 | Tipo de Risco | Exposição | Perigo / Fonte Geradora | Resultado da Avaliação | Reconhecido? | Risco Ocupacional / Dano | Avaliação Inicial (P x S) | Medidas de Controle / EPIs / EPCs | Avaliação Residual (P x S) | eSocial / Plano de Ação |
 
                 ## APÊNDICE B – PLANO DE AÇÃO DE SAÚDE MENTAL E RISCOS PSICOSSOCIAIS
@@ -216,10 +253,13 @@ if btn_analisar:
 
                 texto_resposta = response.choices[0].message.content
 
-                # Converte todo o texto e tabelas para o formato Word
-                bytes_word = converter_markdown_para_word(texto_resposta)
+                # Converte o relatório formatado em Word Paisagem com Tabelas Coloridas
+                bytes_word = converter_markdown_para_word_paisagem(
+                    texto_resposta
+                )
 
-                # Grava na sessão para manter o botão fixo
+                # Grava no session_state para manter o estado e os botões ativos
+                st.session_state.texto_resposta = texto_resposta
                 st.session_state.docx_bytes = bytes_word
 
                 st.success(
@@ -229,14 +269,18 @@ if btn_analisar:
             except Exception as e:
                 st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
 
-# Exibe o botão de download persistente (sem resetar a página)
-if st.session_state.docx_bytes:
+# Área fixa de Download e Pré-visualização
+if st.session_state.docx_bytes and st.session_state.texto_resposta:
     st.markdown("---")
-    st.markdown("### 📥 Baixar Relatório Completo em Word")
+    st.markdown("### 📥 Baixar Relatório Formatado em Word")
 
     st.download_button(
-        label="📝 Baixar Parecer Técnico + Apêndice A e B (.docx)",
+        label="📝 Baixar Parecer Técnico + Apêndice A e B (.docx - Paisagem)",
         data=st.session_state.docx_bytes,
-        file_name="Parecer_e_Apendice_SST_Completo.docx",
+        file_name="Parecer_e_Apendice_SST_Paisagem.docx",
         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
+
+    st.markdown("---")
+    st.markdown("### 📋 Pré-visualização do Relatório Gerado")
+    st.write(st.session_state.texto_resposta)
