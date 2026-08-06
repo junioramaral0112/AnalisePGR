@@ -1,5 +1,3 @@
-libpango-1.0-0
-libpangoft2-1.0-0
-libharfbuzz-0b
-libglib2.0-0
-libfontconfig1
+streamlit>=1.30.0
+google-genai>=0.1.0
+xhtml2pdf>=0.2.15
