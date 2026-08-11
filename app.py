@@ -55,10 +55,6 @@ if "docx_bytes_2" not in st.session_state:
 if "texto_resposta_2" not in st.session_state:
     st.session_state.texto_resposta_2 = None
 
-# Inicializa o texto da ressalva 2 na sessão para permitir preenchimento por botão
-if "res_2_text" not in st.session_state:
-    st.session_state.res_2_text = ""
-
 # ==========================================================================
 # GERENCIAMENTO DE USUÁRIOS E COTAS (PROTEÇÃO DE TOKENS)
 # ==========================================================================
@@ -335,15 +331,10 @@ with aba_pcmso:
     with col2:
         aso_file_2 = st.file_uploader("📋 Upload do ASO (PDF):", type=["pdf"], key="aso_2")
 
-    # Botão de preenchimento automático com o seu exemplo padrão
-    if st.button("💡 Usar Exemplo Padrão de Auditoria ASO x PCMSO"):
-        st.session_state.res_2_text = "Verificar se o ASO está em conformidade com o PCMSO, se os exames realizados são exatamente os requeridos pelo PCMSO para a função e se há exames faltantes."
-
     ressalvas_text_2 = st.text_area(
-        "📝 Cole ou digite as Ressalvas / Glosas Médicas:",
-        value=st.session_state.res_2_text,
+        "📝 Cole as Ressalvas / Glosas Médicas:",
         height=140,
-        placeholder="Exemplo: Verificar se o ASO está em conformidade com o PCMSO, se os exames são os requeridos...",
+        placeholder="Exemplo: Verificar se o ASO está em conformidade com o PCMSO, se os exames são os requeridos pelo PCMSO",
         key="res_2"
     )
 
