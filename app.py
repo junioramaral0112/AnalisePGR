@@ -319,22 +319,22 @@ with aba_completa:
         st.write(st.session_state.texto_resposta_1)
 
 # ==========================================
-# ABA 2: AUDITORIA FOCADA (PCMSO & ASO)
+# ABA 2: AUDITORIA FOCADA (PCMSO & ASO) - AJUSTADA
 # ==========================================
 with aba_pcmso:
     st.markdown("### Módulo de Auditoria Médica e Cruzamento com ASO")
-    st.markdown("Carregue o **PCMSO** e opcionalmente o **ASO**, focando nas exigências da NR-07.")
+    st.markdown("Carregue o **PCMSO** e o **ASO**, para verificar se os exames realizados atendem rigorosamente às diretrizes da NR-07.")
 
     col1, col2 = st.columns(2)
     with col1:
         pcmso_file_2 = st.file_uploader("🩺 Upload do PCMSO (PDF):", type=["pdf"], key="pcmso_2")
     with col2:
-        aso_file_2 = st.file_uploader("📋 Upload do ASO (Opcional - PDF):", type=["pdf"], key="aso_2")
+        aso_file_2 = st.file_uploader("📋 Upload do ASO (PDF):", type=["pdf"], key="aso_2")
 
     ressalvas_text_2 = st.text_area(
         "📝 Cole as Ressalvas / Glosas Médicas:",
         height=140,
-        placeholder="Exemplo: Divergência entre os exames complementares exigidos no PCMSO e os realizados no ASO...",
+        placeholder="Exemplo: Verificar se o ASO está em conformidade com o PCMSO, se os exames realizados são exatamente os requeridos pelo PCMSO para a função e se há exames faltantes.",
         key="res_2"
     )
 
@@ -350,38 +350,39 @@ with aba_pcmso:
 
         if not api_key:
             st.error("⚠️ Chave DeepSeek não configurada!")
-        elif not pcmso_file_2:
-            st.error("⚠️ Envie o arquivo do PCMSO!")
+        elif not pcmso_file_2 or not aso_file_2:
+            st.error("⚠️ É obrigatório enviar ambos os arquivos (PCMSO e ASO) para realizar a auditoria cruzada!")
         elif not ressalvas_text_2.strip():
             st.error("⚠️ Digite as ressalvas médicas!")
         else:
-            with st.spinner("⏳ Analisando PCMSO/ASO e gerando parecer médico em Word..."):
+            with st.spinner("⏳ Analisando convergência entre PCMSO e ASO e gerando parecer médico em Word..."):
                 try:
                     texto_pcmso = extrair_texto_pdf(pcmso_file_2)
-                    texto_aso = extrair_texto_pdf(aso_file_2) if aso_file_2 else "Nenhum ASO específico enviado."
+                    texto_aso = extrair_texto_pdf(aso_file_2)
                     client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
                     prompt_2 = f"""
-                    Você é um Médico do Trabalho Sênior, especialista em NR-07 e eSocial.
-                    Emita um Parecer Técnico Médico respondendo às ressalvas referentes ao PCMSO e ASO.
+                    Você é um Médico do Trabalho Sênior, especialista em NR-07 e eSocial (S-2220).
+                    Emita um Parecer Técnico Médico focado estritamente em apontar de forma cirúrgica e detalhada o que no ASO enviado NÃO está em conformidade com o PCMSO (exames complementares faltantes, divergência de periodicidade, riscos não cobertos ou inaptidões/aptidões sem fundamentação adequada).
 
                     --- PCMSO ---
                     {texto_pcmso[:35000]}
 
-                    --- ASO / EXAMES ---
+                    --- ASO (DOCUMENTO A SER AUDITADO) ---
                     {texto_aso[:15000]}
 
-                    --- RESSALVAS MÉDICAS ---
+                    --- RESSALVAS E SOLICITAÇÃO DA AUDITORIA ---
                     {ressalvas_text_2}
 
-                    ESTRUTURA:
-                    # PARECER TÉCNICO MÉDICO — PCMSO / NR-07
-                    1. **Objeto e Fundamentação:** Análise do PCMSO e ASO.
-                    2. **Análise Crítica das Ressalvas:** Procedente ou Improcedente.
-                    3. **Conformidade com a NR-07 e eSocial:** Justificativas normativas.
+                    ESTRUTURA OBRIGATÓRIA:
+                    # PARECER TÉCNICO MÉDICO DE CONFORMIDADE ASO x PCMSO — NR-07
+                    1. **Objeto e Fundamentação Médica:** Análise comparativa entre as diretrizes do PCMSO e os dados extraídos do ASO.
+                    2. **Apontamento Específico de Divergências (ASO vs PCMSO):** Aponte detalhadamente o que no ASO não está em conformidade com o PCMSO (listar exatamente quais exames constam ou faltam em desacordo com a matriz de riscos e exigências da NR-07).
+                    3. **Análise Crítica das Ressalvas:** Resposta técnica e fundamentada para a glosa/ressalva médica informada (Procedente / Improcedente).
+                    4. **Conclusão e Providências:** Recomendações diretas para regularização no eSocial.
 
                     ## APÊNDICE – PLANO DE ADEQUAÇÃO E CRONOGRAMA DE EXAMES DO PCMSO
-                    | Setor / Função | Exame / Procedimento | Diretriz NR-07 | Status / Ação Corretiva | Prazo de Implementação |
+                    | Setor / Função | Exame / Procedimento | Diretriz NR-07 (PCMSO) | Status no ASO | Ação Corretiva Necessária | Prazo |
                     """
 
                     response = client.chat.completions.create(
@@ -396,11 +397,11 @@ with aba_pcmso:
 
                     st.session_state.texto_resposta_2 = resp_text
                     st.session_state.docx_bytes_2 = bytes_word
-                    st.success("✅ Auditoria Médica gerada com sucesso!")
+                    st.success("✅ Auditoria Médica cruzada (PCMSO x ASO) gerada com sucesso!")
                 except Exception as e:
                     st.error(f"❌ Erro: {str(e)}")
 
     if st.session_state.docx_bytes_2 and st.session_state.texto_resposta_2:
         st.markdown("---")
-        st.download_button("📥 Baixar Parecer do PCMSO (.docx)", data=st.session_state.docx_bytes_2, file_name="AuditGuard_PCMSO_ASO.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_2")
+        st.download_button("📥 Baixar Parecer PCMSO x ASO (.docx)", data=st.session_state.docx_bytes_2, file_name="AuditGuard_PCMSO_x_ASO.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_2")
         st.write(st.session_state.texto_resposta_2)
