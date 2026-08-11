@@ -55,6 +55,9 @@ if "docx_bytes_2" not in st.session_state:
 if "texto_resposta_2" not in st.session_state:
     st.session_state.texto_resposta_2 = None
 
+if "res_2_text" not in st.session_state:
+    st.session_state.res_2_text = ""
+
 # ==========================================================================
 # GERENCIAMENTO DE USUÁRIOS E COTAS (PROTEÇÃO DE TOKENS)
 # ==========================================================================
@@ -331,10 +334,14 @@ with aba_pcmso:
     with col2:
         aso_file_2 = st.file_uploader("📋 Upload do ASO (PDF):", type=["pdf"], key="aso_2")
 
+    if st.button("💡 Usar Exemplo Padrão de Auditoria ASO x PCMSO"):
+        st.session_state.res_2_text = "Verificar se o ASO está em conformidade com o PCMSO, se os exames realizados são exatamente os requeridos pelo PCMSO para a função e se há exames faltantes."
+
     ressalvas_text_2 = st.text_area(
-        "📝 Cole as Ressalvas / Glosas Médicas:",
+        "📝 Cole ou digite as Ressalvas / Glosas Médicas:",
+        value=st.session_state.res_2_text,
         height=140,
-        placeholder="Exemplo: Verificar se o ASO está em conformidade com o PCMSO, se os exames são os requeridos pelo PCMSO",
+        placeholder="Exemplo: Verificar se o ASO está em conformidade com o PCMSO, se os exames são os requeridos...",
         key="res_2"
     )
 
@@ -363,9 +370,13 @@ with aba_pcmso:
 
                     prompt_2 = f"""
                     Você é um Médico do Trabalho Sênior, especialista em NR-07 e eSocial (S-2220).
-                    Emita um Parecer Técnico Médico focado estritamente em apontar de forma cirúrgica e detalhada o que no ASO enviado NÃO está em conformidade com o PCMSO (exames complementares faltantes, divergência de periodicidade, riscos não cobertos ou inaptidões/aptidões sem fundamentação adequada).
+                    
+                    ATENÇÃO CRÍTICA DE LEITURA: Os documentos de ASO muitas vezes possuem campos preenchidos à mão ou em formato de formulário digitalizado. Faça uma varredura extremamente cuidadosa no texto extraído do ASO para identificar a seção "Exames Realizados e Data de Realização". 
+                    NÃO assuma cegamente que exames estão ausentes se houver menção a eles no texto (como Acuidade Visual, Psicossocial, Hemograma, Glicemia, Reticulócitos, Exame Clínico, etc.). Só aponte ausência caso o exame realmente não conste no documento.
 
-                    ATENÇÃO CRÍTICA: A seção de "Conclusão e Providências" deve trazer o **Veredito Geral** em absoluto destaque (utilizando formatação clara e enfática em negrito/caixa alta), indicando sem margem de dúvida se o ASO está ou não aprovado em conformidade com o PCMSO fornecido.
+                    Emita um Parecer Técnico Médico focado estritamente em apontar de forma cirúrgica e detalhada se o ASO enviado está ou não em conformidade com o PCMSO.
+
+                    ATENÇÃO CRÍTICA: A seção de "Conclusão e Providências" deve trazer o **Veredito Geral** em absoluto destaque (utilizando formatação clara e enfática em negrito/caixa alta), indicando sem margem de dúvida se o ASO está ou não aprovado em conformidade com o PCMSO fornecido com base nos dados reais encontrados.
 
                     --- PCMSO ---
                     {texto_pcmso[:35000]}
@@ -379,10 +390,10 @@ with aba_pcmso:
                     ESTRUTURA OBRIGATÓRIA:
                     # PARECER TÉCNICO MÉDICO DE CONFORMIDADE ASO x PCMSO — NR-07
                     1. **Objeto e Fundamentação Médica:** Análise comparativa entre as diretrizes do PCMSO e os dados extraídos do ASO.
-                    2. **Apontamento Específico de Divergências (ASO vs PCMSO):** Aponte detalhadamente o que no ASO não está em conformidade com o PCMSO (listar exatamente quais exames constam ou faltam em desacordo com a matriz de riscos e exigências da NR-07).
+                    2. **Apontamento Específico de Divergências (ASO vs PCMSO):** Valide rigorosamente os exames que constam no ASO em relação ao PCMSO. Se os exames estão presentes e batem com a norma, ateste a conformidade. Aponte divergências reais apenas se houver ausência real ou periodicidade incorreta.
                     3. **Análise Crítica das Ressalvas:** Resposta técnica e fundamentada para a glosa/ressalva médica informada (Procedente / Improcedente).
                     4. **Conclusão e Providências:**
-                       - **4.1. Veredito Geral (DESTAQUE MÁXIMO OBRIGATÓRIO):** Declaração explícita, em destaque, informando se o ASO está ou NÃO em conformidade com o PCMSO e listando os motivos críticos.
+                       - **4.1. Veredito Geral (DESTAQUE MÁXIMO OBRIGATÓRIO):** Declaração explícita, em destaque, informando se o ASO está ou NÃO em conformidade com o PCMSO com base nos dados reais encontrados.
 
                     ## APÊNDICE – PLANO DE ADEQUAÇÃO E CRONOGRAMA DE EXAMES DO PCMSO
                     | Setor / Função | Exame / Procedimento | Diretriz NR-07 (PCMSO) | Status no ASO | Ação Corretiva Necessária | Prazo |
