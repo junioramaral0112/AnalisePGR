@@ -14,7 +14,7 @@ import streamlit as st
 
 # Configuração da página
 st.set_page_config(
-    page_title="AuditGuard SST — Inteligência em Contestações",
+    page_title="AuditGuard SST — Plataforma de Inteligência",
     page_icon="🛡️",
     layout="wide",
 )
@@ -23,21 +23,16 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-    /* Fundo com gradiente sutil sobre textura tecnológica */
     .stApp {
         background: linear-gradient(rgba(248, 249, 250, 0.93), rgba(248, 249, 250, 0.93)),
                     url('https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?q=80&w=2070');
         background-size: cover;
         background-attachment: fixed;
     }
-    
-    /* Destaques de títulos */
     h1 {
         color: #003366 !important;
         font-weight: 700 !important;
     }
-    
-    /* Suavização de botões */
     .stButton>button {
         border-radius: 8px;
         background-color: #003366;
@@ -50,10 +45,15 @@ st.markdown(
 )
 
 # Persistência da sessão
-if "docx_bytes" not in st.session_state:
-    st.session_state.docx_bytes = None
-if "texto_resposta" not in st.session_state:
-    st.session_state.texto_resposta = None
+if "docx_bytes_1" not in st.session_state:
+    st.session_state.docx_bytes_1 = None
+if "texto_resposta_1" not in st.session_state:
+    st.session_state.texto_resposta_1 = None
+
+if "docx_bytes_2" not in st.session_state:
+    st.session_state.docx_bytes_2 = None
+if "texto_resposta_2" not in st.session_state:
+    st.session_state.texto_resposta_2 = None
 
 # ==========================================================================
 # GERENCIAMENTO DE USUÁRIOS E COTAS (PROTEÇÃO DE TOKENS)
@@ -68,7 +68,6 @@ def _carregar_usuarios() -> dict:
         return {}
     with open(_USERS_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
-        # Reset mensal automático
         mes_atual = datetime.now().month
         mudou = False
         for user in data:
@@ -89,10 +88,8 @@ def _salvar_usuarios(data: dict) -> None:
 def verificar_limite_auditorias(usuario: str) -> tuple[bool, int, int]:
     usuarios = _carregar_usuarios()
     user_data = usuarios.get(usuario, {})
-    
     limite = user_data.get("limite_mensal", LIMITE_MENSAL_PADRAO)
     uso_atual = user_data.get("auditorias_mes_atual", 0)
-    
     return (uso_atual < limite), uso_atual, limite
 
 def incrementar_uso_auditoria(usuario: str):
@@ -101,8 +98,6 @@ def incrementar_uso_auditoria(usuario: str):
         usuarios[usuario]["auditorias_mes_atual"] = usuarios[usuario].get("auditorias_mes_atual", 0) + 1
         _salvar_usuarios(usuarios)
 
-
-# Leitura dos PDFs
 def extrair_texto_pdf(pdf_file):
     try:
         reader = PdfReader(pdf_file)
@@ -116,18 +111,13 @@ def extrair_texto_pdf(pdf_file):
         st.error(f"Erro ao ler PDF: {e}")
         return ""
 
-
-# Aplica cor de fundo em células do Word
 def set_cell_background(cell, fill_hex):
     tcPr = cell._tc.get_or_add_tcPr()
     shd = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{fill_hex}"/>')
     tcPr.append(shd)
 
-
-# Gera Word Paisagem com tabelas coloridas
 def converter_markdown_para_word_paisagem(texto_markdown):
     doc = Document()
-
     section = doc.sections[0]
     section.orientation = WD_ORIENT.LANDSCAPE
     new_width, new_height = section.page_height, section.page_width
@@ -171,7 +161,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
 
         elif linha_str.startswith("|") and linha_str.endswith("|"):
             colunas = [c.strip() for c in linha_str.split("|")[1:-1]]
-
             if all(set(c) <= set("-: ") for c in colunas):
                 continue
 
@@ -179,7 +168,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
                 row_count = 0
                 tabela_atual = doc.add_table(rows=1, cols=len(colunas))
                 tabela_atual.style = "Table Grid"
-
                 hdr_cells = tabela_atual.rows[0].cells
                 for i, col_texto in enumerate(colunas):
                     hdr_cells[i].text = col_texto
@@ -193,7 +181,6 @@ def converter_markdown_para_word_paisagem(texto_markdown):
                 row_count += 1
                 row_cells = tabela_atual.add_row().cells
                 cor_fundo = "F2F4F8" if row_count % 2 == 0 else "FFFFFF"
-
                 for i, col_texto in enumerate(colunas):
                     if i < len(row_cells):
                         row_cells[i].text = col_texto
@@ -215,17 +202,12 @@ def converter_markdown_para_word_paisagem(texto_markdown):
     buffer.seek(0)
     return buffer.getvalue()
 
-
-# Sidebar com a Logo do Repositório do GitHub (raw asset)
+# Sidebar
 LOGO_URL = "https://raw.githubusercontent.com/junioramaral0112/AnalisePGR/main/logo.png"
-
 st.sidebar.image(LOGO_URL, width=220)
 st.sidebar.title("⚙️ Painel do Sistema")
-st.sidebar.info(
-    "**AuditGuard SST**\n\nInteligência e Gestão de Auditoria de SST integradas via **Inteligência Artificial**."
-)
+st.sidebar.info("**AuditGuard SST**\n\nEcossistema integrado de Inteligência Artificial para SST.")
 
-# Indicador de Consumo da Cota no Sidebar para o Usuário
 usuario_logado = st.session_state.get("usuario", "admin")
 permitido_sidebar, uso_sidebar, limite_sidebar = verificar_limite_auditorias(usuario_logado)
 st.sidebar.markdown("---")
@@ -233,148 +215,192 @@ st.sidebar.markdown("### 📊 Cota Mensal (IA)")
 st.sidebar.progress(min(uso_sidebar / limite_sidebar, 1.0))
 st.sidebar.write(f"Utilizadas: **{uso_sidebar} / {limite_sidebar}**")
 
-# Cabeçalho Principal com Logo e Nome Comercial
+# Cabeçalho Principal
 col_logo, col_titulo = st.columns([1, 5])
-
 with col_logo:
     st.image(LOGO_URL, width=110)
-
 with col_titulo:
-    st.title("AuditGuard SST")
-    st.markdown(
-        "**Plataforma de Inteligência em Contestações de Auditoria e Apêndices Normativos**"
-    )
+    st.title("AuditGuard SST — Central de Inteligência")
+    st.markdown("**Selecione o módulo de auditoria desejado nas abas abaixo:**")
 
 st.markdown("---")
-st.markdown(
-    "Carregue os arquivos do **PGR** e **PCMSO** da empresa e cole o texto das ressalvas/glosas recebidas da auditoria."
-)
 
-col1, col2 = st.columns(2)
+# ABAS DO SISTEMA
+aba_completa, aba_pcmso = st.tabs(["🚀 Auditoria Completa (PGR + PCMSO + Apêndices)", "🩺 Auditoria Focada (PCMSO & ASO)"])
 
-with col1:
-    pgr_file = st.file_uploader(
-        "📄 Upload do PGR (PDF):", type=["pdf"], key="pgr"
+# ==========================================
+# ABA 1: AUDITORIA COMPLETA ORIGINAL
+# ==========================================
+with aba_completa:
+    st.markdown("### Módulo de Contestação Geral e Apêndices")
+    st.markdown("Carregue os arquivos do **PGR** e **PCMSO** e informe as ressalvas gerais da auditoria.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pgr_file_1 = st.file_uploader("📄 Upload do PGR (PDF):", type=["pdf"], key="pgr_1")
+    with col2:
+        pcmso_file_1 = st.file_uploader("🩺 Upload do PCMSO (PDF):", type=["pdf"], key="pcmso_1")
+
+    ressalvas_text_1 = st.text_area(
+        "📝 Cole o texto das Ressalvas / Glosas Gerais:",
+        height=140,
+        placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário...",
+        key="res_1"
     )
 
-with col2:
-    pcmso_file = st.file_uploader(
-        "🩺 Upload do PCMSO (PDF):", type=["pdf"], key="pcmso"
+    btn_analisar_1 = st.button("🚀 Executar Auditoria Completa", key="btn_1")
+
+    if btn_analisar_1:
+        permitido, uso_atual, limite_max = verificar_limite_auditorias(usuario_logado)
+        if not permitido:
+            st.error(f"🚫 **Limite mensal atingido:** {limite_max} auditorias permitidas para este mês.")
+            st.stop()
+
+        api_key = str(st.secrets.get("DEEPSEEK_API_KEY", os.environ.get("DEEPSEEK_API_KEY", ""))).strip()
+
+        if not api_key:
+            st.error("⚠️ Chave DeepSeek não configurada!")
+        elif not pgr_file_1 or not pcmso_file_1:
+            st.error("⚠️ Envie ambos os arquivos (PGR e PCMSO)!")
+        elif not ressalvas_text_1.strip():
+            st.error("⚠️ Digite as ressalvas!")
+        else:
+            with st.spinner("⏳ Processando auditoria completa e gerando Word..."):
+                try:
+                    texto_pgr = extrair_texto_pdf(pgr_file_1)
+                    texto_pcmso = extrair_texto_pdf(pcmso_file_1)
+                    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+
+                    prompt_1 = f"""
+                    Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior.
+                    Emita um Parecer Técnico de Contestação de SST e a revisão integral dos Apêndices A e B.
+
+                    --- PGR ---
+                    {texto_pgr[:35000]}
+
+                    --- PCMSO ---
+                    {texto_pcmso[:35000]}
+
+                    --- RESSALVAS ---
+                    {ressalvas_text_1}
+
+                    ESTRUTURA:
+                    # PARECER TÉCNICO DE CONTESTAÇÃO DE SST — AUDITGUARD
+                    1. **Objeto e Finalidade:** Descrição completa.
+                    2. **Análise Crítica das Ressalvas:** Procedente ou Improcedente.
+                    3. **Fundamentação Legal:** NR-01, NR-07, NR-17.
+
+                    ## APÊNDICE A – INVENTÁRIO DE RISCOS OCUPACIONAIS CONSOLIDADO
+                    | Tipo de Risco | Exposição | Perigo / Fonte Geradora | Resultado da Avaliação | Reconhecido? | Risco Ocupacional / Dano | Avaliação Inicial (P x S) | Medidas de Controle / EPIs / EPCs | Avaliação Residual (P x S) | eSocial / Plano de Ação |
+
+                    ## APÊNDICE B – PLANO DE AÇÃO DE SAÚDE MENTAL E RISCOS PSICOSSOCIAIS
+                    | Ação Preventiva / Corretiva | Fator de Risco | Responsável | Prazo | Indicador de Acompanhamento |
+                    """
+
+                    response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[{"role": "system", "content": "Motor de IA AuditGuard."}, {"role": "user", "content": prompt_1}],
+                        stream=False,
+                    )
+
+                    resp_text = response.choices[0].message.content
+                    bytes_word = converter_markdown_para_word_paisagem(resp_text)
+                    incrementar_uso_auditoria(usuario_logado)
+
+                    st.session_state.texto_resposta_1 = resp_text
+                    st.session_state.docx_bytes_1 = bytes_word
+                    st.success("✅ Auditoria Completa gerada com sucesso!")
+                except Exception as e:
+                    st.error(f"❌ Erro: {str(e)}")
+
+    if st.session_state.docx_bytes_1 and st.session_state.texto_resposta_1:
+        st.markdown("---")
+        st.download_button("📥 Baixar Parecer Completo (.docx)", data=st.session_state.docx_bytes_1, file_name="AuditGuard_Completo.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_1")
+        st.write(st.session_state.texto_resposta_1)
+
+# ==========================================
+# ABA 2: AUDITORIA FOCADA (PCMSO & ASO)
+# ==========================================
+with aba_pcmso:
+    st.markdown("### Módulo de Auditoria Médica e Cruzamento com ASO")
+    st.markdown("Carregue o **PCMSO** e opcionalmente o **ASO**, focando nas exigências da NR-07.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pcmso_file_2 = st.file_uploader("🩺 Upload do PCMSO (PDF):", type=["pdf"], key="pcmso_2")
+    with col2:
+        aso_file_2 = st.file_uploader("📋 Upload do ASO (Opcional - PDF):", type=["pdf"], key="aso_2")
+
+    ressalvas_text_2 = st.text_area(
+        "📝 Cole as Ressalvas / Glosas Médicas:",
+        height=140,
+        placeholder="Exemplo: Divergência entre os exames complementares exigidos no PCMSO e os realizados no ASO...",
+        key="res_2"
     )
 
-ressalvas_text = st.text_area(
-    "📝 Cole o texto das Ressalvas / Glosas da Auditoria aqui:",
-    height=160,
-    placeholder="Exemplo: O documento foi Aceito com Ressalva pois os riscos psicossociais não constam no Inventário de Riscos Ocupacionais...",
-)
+    btn_analisar_2 = st.button("🚀 Executar Auditoria Médica (PCMSO/ASO)", key="btn_2")
 
-btn_analisar = st.button("🚀 Analisar Ressalvas com AuditGuard SST")
+    if btn_analisar_2:
+        permitido, uso_atual, limite_max = verificar_limite_auditorias(usuario_logado)
+        if not permitido:
+            st.error(f"🚫 **Limite mensal atingido:** {limite_max} auditorias permitidas.")
+            st.stop()
 
-if btn_analisar:
-    # 1. VERIFICAÇÃO DE COTA ANTES DE GASTAR TOKENS
-    permitido, uso_atual, limite_max = verificar_limite_auditorias(usuario_logado)
-    
-    if not permitido:
-        st.error(f"🚫 **Limite mensal atingido:** Você atingiu o teto de {limite_max} auditorias permitidas para este mês. Entre em contato com o suporte para regularizar ou ampliar o plano.")
-        st.stop()
+        api_key = str(st.secrets.get("DEEPSEEK_API_KEY", os.environ.get("DEEPSEEK_API_KEY", ""))).strip()
 
-    api_key = ""
-    if "DEEPSEEK_API_KEY" in st.secrets:
-        api_key = str(st.secrets["DEEPSEEK_API_KEY"]).strip()
-    else:
-        api_key = str(os.environ.get("DEEPSEEK_API_KEY", "")).strip()
+        if not api_key:
+            st.error("⚠️ Chave DeepSeek não configurada!")
+        elif not pcmso_file_2:
+            st.error("⚠️ Envie o arquivo do PCMSO!")
+        elif not ressalvas_text_2.strip():
+            st.error("⚠️ Digite as ressalvas médicas!")
+        else:
+            with st.spinner("⏳ Analisando PCMSO/ASO e gerando parecer médico em Word..."):
+                try:
+                    texto_pcmso = extrair_texto_pdf(pcmso_file_2)
+                    texto_aso = extrair_texto_pdf(aso_file_2) if aso_file_2 else "Nenhum ASO específico enviado."
+                    client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
 
-    if not api_key:
-        st.error(
-            "⚠️ Nenhuma chave do DeepSeek configurada! Adicione `DEEPSEEK_API_KEY` nos Secrets do Streamlit Cloud."
-        )
-    elif not pgr_file or not pcmso_file:
-        st.error("⚠️ É obrigatório enviar ambos os arquivos (PGR e PCMSO)!")
-    elif not ressalvas_text.strip():
-        st.error("⚠️ Digite ou cole o texto das ressalvas recebidas!")
-    else:
-        with st.spinner(
-            "⏳ Processando documentos e montando a contestação em Word..."
-        ):
-            try:
-                texto_pgr = extrair_texto_pdf(pgr_file)
-                texto_pcmso = extrair_texto_pdf(pcmso_file)
+                    prompt_2 = f"""
+                    Você é um Médico do Trabalho Sênior, especialista em NR-07 e eSocial.
+                    Emita um Parecer Técnico Médico respondendo às ressalvas referentes ao PCMSO e ASO.
 
-                client = OpenAI(
-                    api_key=api_key, base_url="https://api.deepseek.com"
-                )
+                    --- PCMSO ---
+                    {texto_pcmso[:35000]}
 
-                prompt_completo = f"""
-                Você é um Engenheiro de Segurança do Trabalho e Médico do Trabalho Sênior, especialista em Auditorias e Conformidade Normativa de SST (NR-01, NR-07, NR-17, eSocial).
+                    --- ASO / EXAMES ---
+                    {texto_aso[:15000]}
 
-                Sua missão é emitir um ÚNICO DOCUMENTO COMPLETO contendo o Parecer Técnico de Contestação de SST e a revisão integral dos Apêndices A e B.
+                    --- RESSALVAS MÉDICAS ---
+                    {ressalvas_text_2}
 
-                --- CONTEÚDO DO PGR ---
-                {texto_pgr[:40000]}
+                    ESTRUTURA:
+                    # PARECER TÉCNICO MÉDICO — PCMSO / NR-07
+                    1. **Objeto e Fundamentação:** Análise do PCMSO e ASO.
+                    2. **Análise Crítica das Ressalvas:** Procedente ou Improcedente.
+                    3. **Conformidade com a NR-07 e eSocial:** Justificativas normativas.
 
-                --- CONTEÚDO DO PCMSO ---
-                {texto_pcmso[:40000]}
+                    ## APÊNDICE – PLANO DE ADEQUAÇÃO E CRONOGRAMA DE EXAMES DO PCMSO
+                    | Setor / Função | Exame / Procedimento | Diretriz NR-07 | Status / Ação Corretiva | Prazo de Implementação |
+                    """
 
-                --- RESSALVAS DA AUDITORIA ---
-                {ressalvas_text}
+                    response = client.chat.completions.create(
+                        model="deepseek-chat",
+                        messages=[{"role": "system", "content": "Motor médico IA AuditGuard."}, {"role": "user", "content": prompt_2}],
+                        stream=False,
+                    )
 
-                ESTRUTURA OBRIGATÓRIA DO DOCUMENTO:
+                    resp_text = response.choices[0].message.content
+                    bytes_word = converter_markdown_para_word_paisagem(resp_text)
+                    incrementar_uso_auditoria(usuario_logado)
 
-                # PARECER TÉCNICO DE CONTESTAÇÃO DE SST — AUDITGUARD
-                1. **Objeto e Finalidade:** Descrição completa dos documentos auditados.
-                2. **Análise Crítica das Ressalvas:** Parecer detalhado se é Procedente ou Improcedente para cada ressalva informada.
-                3. **Fundamentação Legal:** Citar NR-01, NR-07, NR-17 e regras de transição.
+                    st.session_state.texto_resposta_2 = resp_text
+                    st.session_state.docx_bytes_2 = bytes_word
+                    st.success("✅ Auditoria Médica gerada com sucesso!")
+                except Exception as e:
+                    st.error(f"❌ Erro: {str(e)}")
 
-                ## APÊNDICE A – INVENTÁRIO DE RISCOS OCUPACIONAIS CONSOLIDADO
-                Forneça a TABELA MARKDOWN COMPLETA preenchendo detalhadamente as 10 colunas para todos os riscos encontrados no PGR/PCMSO, INCLUINDO OS RISCOS PSICOSSOCIAIS:
-                | Tipo de Risco | Exposição | Perigo / Fonte Geradora | Resultado da Avaliação | Reconhecido? | Risco Ocupacional / Dano | Avaliação Inicial (P x S) | Medidas de Controle / EPIs / EPCs | Avaliação Residual (P x S) | eSocial / Plano de Ação |
-
-                ## APÊNDICE B – PLANO DE AÇÃO DE SAÚDE MENTAL E RISCOS PSICOSSOCIAIS
-                Forneça a TABELA MARKDOWN do Plano de Ação detalhada:
-                | Ação Preventiva / Corretiva | Fator de Risco | Responsável | Prazo | Indicador de Acompanhamento |
-                """
-
-                response = client.chat.completions.create(
-                    model="deepseek-chat",
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Você é o motor de inteligência do AuditGuard SST.",
-                        },
-                        {"role": "user", "content": prompt_completo},
-                    ],
-                    stream=False,
-                )
-
-                texto_resposta = response.choices[0].message.content
-
-                bytes_word = converter_markdown_para_word_paisagem(
-                    texto_resposta
-                )
-
-                # Computa o consumo no arquivo JSON apenas após sucesso na API
-                incrementar_uso_auditoria(usuario_logado)
-
-                st.session_state.texto_resposta = texto_resposta
-                st.session_state.docx_bytes = bytes_word
-
-                st.success("✅ Contestação e Apêndice gerados com sucesso! (Uso computado)")
-
-            except Exception as e:
-                st.error(f"❌ Ocorreu um erro durante o processamento: {str(e)}")
-
-# Downloads e visualização
-if st.session_state.docx_bytes and st.session_state.texto_resposta:
-    st.markdown("---")
-    st.markdown("### 📥 Baixar Relatório Formatado em Word")
-
-    st.download_button(
-        label="📝 Baixar Parecer Técnico + Apêndice A e B (.docx - AuditGuard)",
-        data=st.session_state.docx_bytes,
-        file_name="AuditGuard_Parecer_e_Apendice_SST.docx",
-        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
-
-    st.markdown("---")
-    st.markdown("### 📋 Pré-visualização do Relatório Gerado")
-    st.write(st.session_state.texto_resposta)
+    if st.session_state.docx_bytes_2 and st.session_state.texto_resposta_2:
+        st.markdown("---")
+        st.download_button("📥 Baixar Parecer do PCMSO (.docx)", data=st.session_state.docx_bytes_2, file_name="AuditGuard_PCMSO_ASO.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", key="dl_2")
+        st.write(st.session_state.texto_resposta_2)
